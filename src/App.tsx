@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { FormEvent } from 'react';
 import { Activity, ChevronDown, CircleHelp, Command, Menu, Monitor, Plus, Server, Settings2, ShieldCheck, SquareTerminal, TerminalSquare, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -57,7 +58,7 @@ export default function App() {
 
   useEffect(() => () => closeSocket(), [closeSocket]);
 
-  const connect = (event: React.FormEvent) => {
+  const connect = (event: FormEvent) => {
     event.preventDefault();
     if (!host.trim()) { setError('Please enter a host name or IP address.'); return; }
     const sshPort = Number(port);
