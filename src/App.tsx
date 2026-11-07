@@ -38,6 +38,8 @@ export default function App() {
   const terminalRef = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
+  const sessionSockets = useRef(new Map<string, WebSocket>());
+  const terminalBuffers = useRef(new Map<string, string>());
   const active = sessions.find(item => item.id === activeId) ?? sessions[0];
   const recentSshSessions = sessions.filter(item => item.shell !== 'pwsh' && item.host.trim()).sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -63,11 +65,25 @@ export default function App() {
       if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
     });
     observer.observe(terminalRef.current);
-    const input = terminal.onData(data => { if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: 'data', data })); });
+    const bufferedOutput = terminalBuffers.current.get(activeId);
+    // Replaying a terminal transcript can trigger xterm device-query replies
+    // (for example DA1: ESC[?1;2c). Those are emulator responses, not user
+    // keystrokes, and must never be sent back to the live SSH shell.
+    let replaying = Boolean(bufferedOutput);
+    const input = terminal.onData(data => {
+      if (replaying) return;
+      const activeSocket = sessionSockets.current.get(activeId);
+      if (activeSocket?.readyState === WebSocket.OPEN) activeSocket.send(JSON.stringify({ type: 'data', data }));
+    });
+    if (bufferedOutput) terminal.write(bufferedOutput, () => { replaying = false; });
     return () => { input.dispose(); observer.disconnect(); terminal.dispose(); term.current = null; };
   }, [activeId, status === 'connected']);
 
-  useEffect(() => () => closeSocket(), [closeSocket]);
+  useEffect(() => () => {
+    sessionSockets.current.forEach(ws => ws.close());
+    sessionSockets.current.clear();
+    closeSocket();
+  }, [closeSocket]);
 
   const connect = (event?: FormEvent, saved?: SavedSession) => {
     event?.preventDefault();
@@ -78,38 +94,63 @@ export default function App() {
     const targetIdentity = saved?.identityFile ?? identityFile;
     if (targetShell === 'ssh' && !targetHost.trim()) { setError('Please enter a host name or IP address.'); return; }
     if (targetShell === 'ssh' && (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535)) { setError('Port must be between 1 and 65535.'); return; }
-    closeSocket(); setError(''); setStatus('connecting'); setShowConnect(false);
+    const sessionId = saved?.id ?? activeId;
+    sessionSockets.current.get(sessionId)?.close();
+    sessionSockets.current.delete(sessionId);
+    socket.current = null;
+    setError(''); setStatus('connecting'); setShowConnect(false);
     term.current?.clear();
+    terminalBuffers.current.set(sessionId, '');
     const ws = new WebSocket('ws://127.0.0.1:8700/terminal'); socket.current = ws;
+    sessionSockets.current.set(sessionId, ws);
     ws.onopen = () => ws.send(JSON.stringify({ type: 'connect', shell: targetShell, host: targetHost.trim(), username: targetUsername.trim(), port: sshPort, identityFile: targetIdentity.trim(), cols: term.current?.cols ?? 100, rows: term.current?.rows ?? 30 }));
     ws.onmessage = event => {
       const message = JSON.parse(String(event.data)) as { type: string; data?: string; message?: string; exitCode?: number };
-      if (message.type === 'data' && message.data) term.current?.write(message.data);
-      if (message.type === 'status') { setStatus('connected'); setSessions(current => current.map(item => item.id === (saved?.id ?? activeId) ? { ...item, title: targetShell === 'pwsh' ? 'Local PowerShell' : targetHost.trim(), host: targetHost.trim(), username: targetUsername.trim(), port: sshPort, identityFile: targetIdentity.trim(), shell: targetShell, updatedAt: Date.now() } : item)); term.current?.focus(); }
-      if (message.type === 'error') { setError(message.message ?? 'Unable to start terminal session.'); setStatus('error'); setShowConnect(true); }
-      if (message.type === 'exit') { setStatus('idle'); term.current?.writeln('\r\n\x1b[90mTerminal session ended.\x1b[0m'); }
+      if (message.type === 'data' && message.data) {
+        const previous = terminalBuffers.current.get(sessionId) ?? '';
+        terminalBuffers.current.set(sessionId, (previous + message.data).slice(-1_000_000));
+        if (activeId === sessionId) term.current?.write(message.data);
+      }
+      if (message.type === 'status') {
+        if (activeId === sessionId) setStatus('connected');
+        setSessions(current => current.map(item => item.id === sessionId ? { ...item, title: targetShell === 'pwsh' ? 'Local PowerShell' : targetHost.trim(), host: targetHost.trim(), username: targetUsername.trim(), port: sshPort, identityFile: targetIdentity.trim(), shell: targetShell, updatedAt: Date.now() } : item));
+        if (activeId === sessionId) term.current?.focus();
+      }
+      if (message.type === 'error' && activeId === sessionId) { setError(message.message ?? 'Unable to start terminal session.'); setStatus('error'); setShowConnect(true); }
+      if (message.type === 'exit') {
+        if (activeId === sessionId) { setStatus('idle'); term.current?.writeln('\r\n\x1b[90mTerminal session ended.\x1b[0m'); }
+        sessionSockets.current.delete(sessionId);
+      }
     };
-    ws.onerror = () => { setError('Cannot reach the local SSH bridge. Start the app with npm run dev.'); setStatus('error'); setShowConnect(true); };
-    ws.onclose = () => { if (socket.current === ws) socket.current = null; };
+    ws.onerror = () => { if (activeId === sessionId) { setError('Cannot reach the local SSH bridge. Start the app with npm run dev.'); setStatus('error'); setShowConnect(true); } };
+    ws.onclose = () => { if (socket.current === ws) socket.current = null; if (sessionSockets.current.get(sessionId) === ws) sessionSockets.current.delete(sessionId); };
   };
 
   const newSession = () => {
     const item: SavedSession = { id: crypto.randomUUID(), title: 'New connection', host: '', username: '', port: 22, identityFile: '', updatedAt: Date.now() };
-    setSessions(current => [item, ...current]); setActiveId(item.id); setHost(''); setUsername(''); setPort('22'); setIdentityFile(''); setShell('ssh');
-    setError(''); setStatus('idle'); setShowConnect(true); closeSocket();
+    setSessions(current => [item, ...current]); setActiveId(item.id); socket.current = null; setHost(''); setUsername(''); setPort('22'); setIdentityFile(''); setShell('ssh');
+    setError(''); setStatus('idle'); setShowConnect(true);
   };
   const selectSession = (item: SavedSession) => {
-    closeSocket(); setActiveId(item.id); setHost(item.host); setUsername(item.username); setPort(String(item.port)); setIdentityFile(item.identityFile); setShell(item.shell ?? 'ssh');
-    setError(''); setShowConnect(true);
+    const existingSocket = sessionSockets.current.get(item.id);
+    const isConnected = existingSocket?.readyState === WebSocket.OPEN;
+    socket.current = existingSocket ?? null;
+    setActiveId(item.id); setHost(item.host); setUsername(item.username); setPort(String(item.port)); setIdentityFile(item.identityFile); setShell(item.shell ?? 'ssh');
+    setError(''); setStatus(isConnected ? 'connected' : 'idle'); setShowConnect(!isConnected);
   };
 
   const deleteSession = (id: string) => {
     const remaining = sessions.filter(item => item.id !== id);
+    sessionSockets.current.get(id)?.close();
+    sessionSockets.current.delete(id);
+    terminalBuffers.current.delete(id);
     setSessions(remaining);
     if (activeId === id) {
       const next = remaining[0];
-      closeSocket(); setStatus('idle'); setError(''); setShowConnect(true);
+      socket.current = null; setStatus('idle'); setError(''); setShowConnect(true);
       setActiveId(next?.id ?? 'welcome');
+      const nextSocket = next ? sessionSockets.current.get(next.id) : undefined;
+      if (nextSocket?.readyState === WebSocket.OPEN) { socket.current = nextSocket; setStatus('connected'); setShowConnect(false); }
       setHost(next?.host ?? ''); setUsername(next?.username ?? '');
       setPort(String(next?.port ?? 22)); setIdentityFile(next?.identityFile ?? '');
       setShell(next?.shell ?? 'ssh');
