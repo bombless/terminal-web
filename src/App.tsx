@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Activity, ArrowLeftRight, ChevronDown, CircleHelp, Command, Menu, Monitor, Play, Plus, Server, Settings2, ShieldCheck, Square, SquareTerminal, TerminalSquare, X } from 'lucide-react';
+import { Activity, ArrowLeftRight, ChevronDown, CircleHelp, Command, Menu, Monitor, Play, Plus, Server, Settings2, ShieldCheck, Square, SquareTerminal, TerminalSquare, Trash2, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -103,6 +103,19 @@ export default function App() {
     setError(''); setShowConnect(true);
   };
 
+  const deleteSession = (id: string) => {
+    const remaining = sessions.filter(item => item.id !== id);
+    setSessions(remaining);
+    if (activeId === id) {
+      const next = remaining[0];
+      closeSocket(); setStatus('idle'); setError(''); setShowConnect(true);
+      setActiveId(next?.id ?? 'welcome');
+      setHost(next?.host ?? ''); setUsername(next?.username ?? '');
+      setPort(String(next?.port ?? 22)); setIdentityFile(next?.identityFile ?? '');
+      setShell(next?.shell ?? 'ssh');
+    }
+  };
+
   const startForwarding = () => {
     const saved = recentSshSessions.find(item => item.id === forwardHostId) ?? recentSshSessions[0];
     const remote = Number(remoteForwardPort);
@@ -132,7 +145,7 @@ export default function App() {
       <div className="brand"><div className="brand-mark"><SquareTerminal size={19}/></div><span>terminal</span><button className="icon-button sidebar-toggle" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar"><Menu size={17}/></button></div>
       <button className="new-chat" onClick={newSession}><Plus size={17}/><span>New connection</span><span className="shortcut">⌘ K</span></button>
       <div className="side-label">YOUR SESSIONS</div>
-      <div className="session-list">{sessions.map(item => <button key={item.id} className={`session-item ${item.id === activeId ? 'selected' : ''}`} onClick={() => selectSession(item)}><TerminalSquare size={15}/><span>{item.title || 'New connection'}</span></button>)}</div>
+      <div className="session-list">{sessions.map(item => <div key={item.id} className={`session-row ${item.id === activeId ? 'selected' : ''}`}><button type="button" className={`session-item ${item.id === activeId ? 'selected' : ''}`} onClick={() => selectSession(item)}><TerminalSquare size={15}/><span>{item.title || 'New connection'}</span></button><button type="button" className="session-delete" onClick={() => deleteSession(item.id)} aria-label={`Delete ${item.title || 'New connection'}`} title="Delete session"><Trash2 size={14}/></button></div>)}</div>
       <div className="sidebar-bottom">
         {activeForward && <button type="button" className={`sidebar-forwards ${showForwarding ? 'selected' : ''}`} onClick={() => setShowForwarding(true)} aria-label="Open SSH Port Forwarding settings"><span className="sidebar-forward-heading"><span className="state-dot live"/> ACTIVE PORT FORWARD</span><span className="sidebar-forward-row"><ArrowLeftRight size={14}/><span><strong>localhost:{activeForward.localPort}</strong><small>→ {activeForward.host}:{activeForward.remotePort}</small></span></span></button>}
         <div className="local-card"><div className="local-icon"><ShieldCheck size={17}/></div><div><strong>Private by design</strong><small>Keys stay on your machine</small></div><span className="online-dot"/></div>
