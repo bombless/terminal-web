@@ -226,10 +226,9 @@ export default function App() {
     <main className="main-panel">
       <header className="topbar">
         <div className="top-left">{!sidebarOpen && <button className="icon-button" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar"><Menu size={18}/></button>}<span className="breadcrumb">Workspace</span><span className="crumb-divider">/</span><strong>{active?.title || 'New connection'}</strong><ChevronDown size={14} className="muted-icon"/></div>
-        <div className="top-right"><span className="bridge-state"><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Local bridge'}</span></div>
+        <div className="top-right"><span className="bridge-state"><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Local bridge'}</span><div className="workspace-actions"><span className="clock">{clock}</span><button className="connect-button" onClick={() => { closeSocket(); setStatus('idle'); }}><Plus size={15}/> Connect</button></div></div>
       </header>
       <section className="terminal-workspace">
-        <div className="workspace-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> INTERACTIVE SESSION</div><h1>{status === 'connected' && active?.title ? active.title : 'Your terminal, anywhere.'}</h1><p>A focused workspace for local PowerShell and remote SSH sessions.</p></div><div className="workspace-actions"><span className="clock">{clock}</span><button className="connect-button" onClick={() => { closeSocket(); setStatus('idle'); }}><Plus size={15}/> Connect</button></div></div>
         {showForwarding && activeForward && <div className="start-panels forwarding-detail-panels">
           <section className="recent-panel forward-panel forwarding-detail-card">
             <div className="start-panel-heading"><div className="start-panel-icon recent-icon"><ArrowLeftRight size={18}/></div><div><h2>SSH Port Forwarding</h2><p>Manage your active secure TCP tunnel</p></div></div>
