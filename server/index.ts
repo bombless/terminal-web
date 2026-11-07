@@ -57,6 +57,10 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
   const terminal = spawn(executable, args, {
     name: 'xterm-256color', cols: Math.max(20, Math.min(400, input.cols ?? 100)),
     rows: Math.max(5, Math.min(200, input.rows ?? 30)), cwd: process.env.USERPROFILE,
+    // Use node-pty's bundled ConPTY DLL on Windows. The system-ConPTY cleanup path
+    // forks conpty_console_list_agent, whose AttachConsole can fail for a shell
+    // that has already detached/exited and produces an uncaught child-process error.
+    useConptyDll: process.platform === 'win32',
     env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
   });
   sessions.set(socket, terminal);
