@@ -71,6 +71,23 @@ export default function App() {
       });
       const fit = new FitAddon();
       terminal.loadAddon(fit); terminal.loadAddon(new WebLinksAddon()); terminal.open(mount);
+      terminal.attachCustomKeyEventHandler(event => {
+        if (event.type !== 'keydown' || !(event.ctrlKey || event.metaKey)) return true;
+        const key = event.key.toLowerCase();
+        if (key === 'c') {
+          if (terminal.hasSelection()) {
+            void navigator.clipboard.writeText(terminal.getSelection()).catch(() => {});
+            return false;
+          }
+          // With no selection, let xterm send Ctrl+C (ETX) to interrupt the process.
+          return true;
+        }
+        if (key === 'v') {
+          void navigator.clipboard.readText().then(text => { if (text) terminal.paste(text); }).catch(() => {});
+          return false;
+        }
+        return true;
+      });
       terminalInstances.current.set(item.id, terminal); terminalFits.current.set(item.id, fit);
       terminal.onData(data => {
         if (activeIdRef.current !== item.id) return;
@@ -215,7 +232,7 @@ export default function App() {
   return <div className="app-shell">
     <aside className={`sidebar ${sidebarOpen ? '' : 'sidebar-hidden'}`}>
       <div className="brand"><div className="brand-mark"><SquareTerminal size={19}/></div><span>terminal</span><button className="icon-button sidebar-toggle" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar"><Menu size={17}/></button></div>
-      <button className="new-chat" onClick={newSession}><Plus size={17}/><span>New connection</span><span className="shortcut">⌘ K</span></button>
+      <button className="new-chat" onClick={newSession}><Plus size={17}/><span>New connection</span></button>
       <div className="side-label">YOUR SESSIONS</div>
       <div className="session-list">{sessions.map(item => <div key={item.id} className={`session-row ${item.id === activeId ? 'selected' : ''}`}><button type="button" className={`session-item ${item.id === activeId ? 'selected' : ''}`} onClick={() => selectSession(item)}><TerminalSquare size={15}/><span>{item.title || 'New connection'}</span></button><button type="button" className="session-delete" onClick={() => deleteSession(item.id)} aria-label={`Delete ${item.title || 'New connection'}`} title="Delete session"><Trash2 size={14}/></button></div>)}</div>
       <div className="sidebar-bottom">
@@ -270,7 +287,7 @@ export default function App() {
           <div className="terminal-screen">{sessions.map(item => <div key={item.id} className="terminal-mount" ref={node => { if (node) terminalMounts.current.set(item.id, node); else terminalMounts.current.delete(item.id); }} style={{ display: item.id === activeId ? 'block' : 'none' }}/>)}</div>
           <div className="terminal-footer"><span><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'SESSION ACTIVE' : 'AWAITING CONNECTION'}</span><span>xterm.js <b>·</b> UTF-8 <b>·</b> {status === 'connected' ? 'INTERACTIVE PTY' : 'LOCAL'}</span></div>
         </div>
-        {status === 'connected' && !showForwarding && <div className="hint-row"><span><kbd>Ctrl</kbd> + <kbd>C</kbd> <span>Interrupt process</span></span><span><kbd>Ctrl</kbd> + <kbd>L</kbd> <span>Clear screen</span></span><span><Monitor size={13}/> Resize-aware PTY</span></div>}
+        {status === 'connected' && !showForwarding && <div className="hint-row"><span><kbd>Ctrl</kbd> + <kbd>C</kbd> <span>Interrupt process</span></span><span><Monitor size={13}/> Resize-aware PTY</span></div>}
       </section>
       <footer className="page-footer"><span>Built for the command line.</span><span><span className="footer-dot"/> All traffic stays on your local machine until you connect.</span></footer>
     </main>
