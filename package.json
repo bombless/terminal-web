@@ -7,9 +7,9 @@
     "dev": "concurrently -k \"npm:dev:server\" \"npm:dev:web\"",
     "dev:web": "vite --host 127.0.0.1",
     "dev:server": "tsx watch server/index.ts",
-    "build": "tsc -b && vite build",
+    "build": "tsc --noEmit && vite build",
     "start": "tsx server/index.ts",
-    "typecheck": "tsc -b --pretty"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.10.0",
