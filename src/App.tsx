@@ -17,10 +17,10 @@ export default function App() {
   const [activeId, setActiveId] = useState(sessions[0]?.id ?? 'welcome');
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showConnect, setShowConnect] = useState(true);
-  const [host, setHost] = useState('');
-  const [username, setUsername] = useState('');
-  const [port, setPort] = useState('22');
-  const [identityFile, setIdentityFile] = useState('');
+  const [host, setHost] = useState(sessions[0]?.host ?? '');
+  const [username, setUsername] = useState(sessions[0]?.username ?? '');
+  const [port, setPort] = useState(String(sessions[0]?.port ?? 22));
+  const [identityFile, setIdentityFile] = useState(sessions[0]?.identityFile ?? '');
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [error, setError] = useState('');
   const [clock, setClock] = useState('SSH TERMINAL');
