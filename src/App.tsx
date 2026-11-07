@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Activity, ChevronDown, CircleHelp, Command, Menu, Monitor, Plus, Server, Settings2, ShieldCheck, SquareTerminal, TerminalSquare, X } from 'lucide-react';
+import { Activity, ArrowLeftRight, ChevronDown, CircleHelp, Command, Menu, Monitor, Play, Plus, Server, Settings2, ShieldCheck, Square, SquareTerminal, TerminalSquare, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -26,6 +26,14 @@ export default function App() {
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [error, setError] = useState('');
   const [clock, setClock] = useState('TERMINAL');
+  const [forwardHostId, setForwardHostId] = useState('');
+  const [remoteForwardPort, setRemoteForwardPort] = useState('');
+  const [localForwardPort, setLocalForwardPort] = useState('');
+  const [forwardStatus, setForwardStatus] = useState<'idle' | 'starting' | 'active' | 'error'>('idle');
+  const [forwardError, setForwardError] = useState('');
+  const [forwardAddress, setForwardAddress] = useState('');
+  const [activeForward, setActiveForward] = useState<{ host: string; username: string; remotePort: number; localPort: number } | null>(null);
+  const forwardSocket = useRef<WebSocket | null>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
@@ -94,9 +102,28 @@ export default function App() {
     setError(''); setShowConnect(true);
   };
 
-  const reconnect = (item: SavedSession) => {
-    setActiveId(item.id); setHost(item.host); setUsername(item.username); setPort(String(item.port)); setIdentityFile(item.identityFile); setShell('ssh');
-    setError(''); setShowConnect(false); connect(undefined, item);
+  const startForwarding = () => {
+    const saved = recentSshSessions.find(item => item.id === forwardHostId) ?? recentSshSessions[0];
+    const remote = Number(remoteForwardPort);
+    const local = Number(localForwardPort || remoteForwardPort);
+    if (!saved) { setForwardError('Create a successful SSH connection first.'); return; }
+    if (![remote, local].every(value => Number.isInteger(value) && value >= 1 && value <= 65535)) { setForwardError('Enter valid TCP ports between 1 and 65535.'); return; }
+    forwardSocket.current?.close(); setForwardError(''); setForwardStatus('starting'); setForwardAddress(`127.0.0.1:${local}`);
+    const ws = new WebSocket('ws://127.0.0.1:8700/forward'); forwardSocket.current = ws;
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'start', host: saved.host, username: saved.username, sshPort: saved.port, identityFile: saved.identityFile, remotePort: remote, localPort: local }));
+    ws.onmessage = event => {
+      const message = JSON.parse(String(event.data)) as { type: string; message?: string };
+      if (message.type === 'started') { setForwardStatus('active'); setActiveForward({ host: saved.host, username: saved.username, remotePort: remote, localPort: local }); }
+      if (message.type === 'error') { setForwardError(message.message ?? 'Unable to start port forwarding.'); setForwardStatus('error'); }
+      if (message.type === 'stopped') { setForwardStatus('idle'); setActiveForward(null); }
+    };
+    ws.onerror = () => { setForwardError('Cannot reach the local SSH bridge.'); setForwardStatus('error'); };
+    ws.onclose = () => { if (forwardSocket.current === ws) { forwardSocket.current = null; setForwardStatus(current => current === 'active' || current === 'starting' ? 'idle' : current); } };
+  };
+  const stopForwarding = () => {
+    const ws = forwardSocket.current;
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
+    ws?.close(); forwardSocket.current = null; setForwardStatus('idle'); setForwardError(''); setActiveForward(null);
   };
 
   return <div className="app-shell">
@@ -106,6 +133,7 @@ export default function App() {
       <div className="side-label">YOUR SESSIONS</div>
       <div className="session-list">{sessions.map(item => <button key={item.id} className={`session-item ${item.id === activeId ? 'selected' : ''}`} onClick={() => selectSession(item)}><TerminalSquare size={15}/><span>{item.title || 'New connection'}</span></button>)}</div>
       <div className="sidebar-bottom">
+        {activeForward && <div className="sidebar-forwards"><div className="sidebar-forward-heading"><span className="state-dot live"/> ACTIVE PORT FORWARD</div><div className="sidebar-forward-row"><ArrowLeftRight size={14}/><div><strong>localhost:{activeForward.localPort}</strong><small>→ {activeForward.host}:{activeForward.remotePort}</small></div></div></div>}
         <div className="local-card"><div className="local-icon"><ShieldCheck size={17}/></div><div><strong>Private by design</strong><small>Keys stay on your machine</small></div><span className="online-dot"/></div>
         <button className="profile-row"><div className="avatar">T</div><span><b>Local workspace</b><small>Windows · PowerShell / SSH</small></span><Settings2 size={17}/></button>
       </div>
@@ -130,10 +158,15 @@ export default function App() {
             {error && <div className="error-message">{error}</div>}
             <button className="submit-button" type="submit" disabled={status === 'connecting'}>{status === 'connecting' ? 'Connecting…' : shell === 'pwsh' ? 'Start PowerShell' : 'Connect to SSH'} <span>↗</span></button>
           </form>
-          <section className="recent-panel">
-            <div className="start-panel-heading"><div className="start-panel-icon recent-icon"><Activity size={18}/></div><div><h2>Recent SSH connections</h2><p>Reconnect to a server with one click</p></div><span className="recent-count">{recentSshSessions.length}</span></div>
-            {recentSshSessions.length ? <div className="recent-list">{recentSshSessions.map(item => <button type="button" className="recent-connection" key={item.id} onClick={() => reconnect(item)} disabled={status === 'connecting'}><span className="recent-server-icon"><Server size={17}/></span><span className="recent-server-info"><strong>{item.title || item.host}</strong><small>{item.username ? `${item.username}@` : ''}{item.host}:{item.port || 22}</small></span><span className="recent-connect-label">Connect <span>↗</span></span></button>)}</div> : <div className="recent-empty"><div className="recent-empty-icon"><Server size={21}/></div><strong>No previous SSH connections</strong><span>Your successfully connected servers will appear here for quick access.</span></div>}
-            <div className="recent-foot"><ShieldCheck size={14}/> Saved locally in this browser</div>
+          <section className="recent-panel forward-panel">
+            <div className="start-panel-heading"><div className="start-panel-icon recent-icon"><ArrowLeftRight size={18}/></div><div><h2>SSH Port Forwarding</h2><p>Expose a remote TCP service on this machine</p></div></div>
+            <label className="forward-label">SSH SERVER<select value={forwardHostId || recentSshSessions[0]?.id || ''} onChange={e => setForwardHostId(e.target.value)} disabled={!recentSshSessions.length || forwardStatus === 'active' || forwardStatus === 'starting'}><option value="">{recentSshSessions.length ? 'Select a saved SSH connection' : 'No saved SSH connections yet'}</option>{recentSshSessions.map(item => <option key={item.id} value={item.id}>{item.username ? `${item.username}@` : ''}{item.host}{item.port !== 22 ? `:${item.port}` : ''}</option>)}</select></label>
+            <div className="forward-port-row"><label className="forward-label">REMOTE TCP PORT<input type="number" min="1" max="65535" value={remoteForwardPort} onChange={e => setRemoteForwardPort(e.target.value)} placeholder="e.g. 5432" disabled={forwardStatus === 'active' || forwardStatus === 'starting'}/></label><div className="forward-arrow"><ArrowLeftRight size={17}/></div><label className="forward-label">LOCAL PORT<input type="number" min="1" max="65535" value={localForwardPort} onChange={e => setLocalForwardPort(e.target.value)} placeholder={remoteForwardPort || 'Same as remote'} disabled={forwardStatus === 'active' || forwardStatus === 'starting'}/></label></div>
+            <div className="forward-explainer"><ShieldCheck size={15}/><span>Secure tunnel: <b>localhost:{localForwardPort || remoteForwardPort || '—'}</b> → remote service <b>127.0.0.1:{remoteForwardPort || '—'}</b></span></div>
+            {forwardError && <div className="error-message">{forwardError}</div>}
+            {forwardStatus === 'active' ? <div className="forward-running"><span className="state-dot live"/> Forwarding active <b>localhost:{forwardAddress.split(':').pop()}</b></div> : <div className="forward-idle"><span className="state-dot"/> {forwardStatus === 'starting' ? 'Starting SSH tunnel…' : 'No active tunnel'}</div>}
+            {forwardStatus === 'active' ? <button type="button" className="submit-button stop-forward-button" onClick={stopForwarding}><Square size={14}/> Stop Forwarding</button> : <button type="button" className="submit-button" onClick={startForwarding} disabled={!recentSshSessions.length || forwardStatus === 'starting'}><Play size={14}/> {forwardStatus === 'starting' ? 'Starting…' : 'Start Forwarding'} <span>↗</span></button>}
+            <div className="recent-foot"><ShieldCheck size={14}/> SSH -L · Bound to 127.0.0.1 only</div>
           </section>
         </div>}
         {status === 'connected' && <div className="terminal-card">

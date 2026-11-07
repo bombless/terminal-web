@@ -1,4 +1,5 @@
 import { createServer } from 'node:http';
+import { spawn as spawnProcess } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, normalize } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,6 +17,8 @@ type ClientMessage =
   | { type: 'data'; data: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'disconnect' };
+type ForwardMessage = { type: 'start'; host: string; username?: string; sshPort: number; identityFile?: string; remotePort: number; localPort: number } | { type: 'stop' };
+const forwardingSessions = new Map<WebSocket, ReturnType<typeof spawnProcess>>();
 
 const mime: Record<string, string> = {
   '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8',
@@ -71,6 +74,36 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
   });
   send(socket, { type: 'status', status: 'connected' });
 }
+function startForwarding(socket: WebSocket, input: Extract<ForwardMessage, { type: 'start' }>) {
+  if (forwardingSessions.has(socket)) throw new Error('This connection already has an active forwarding tunnel.');
+  const host = input.host?.trim() ?? '';
+  if (!host || host.length > 253 || /[\s\u0000-\u001f]/.test(host) || host.startsWith('-')) throw new Error('Select a valid saved SSH host.');
+  for (const [value, label] of [[input.sshPort, 'SSH'], [input.remotePort, 'Remote TCP'], [input.localPort, 'Local TCP']] as const) {
+    if (!Number.isInteger(value) || value < 1 || value > 65535) throw new Error(`${label} port must be between 1 and 65535.`);
+  }
+  const args = ['-N', '-T', '-v', '-o', 'ExitOnForwardFailure=yes', '-o', 'ServerAliveInterval=30', '-L', `127.0.0.1:${input.localPort}:127.0.0.1:${input.remotePort}`, '-p', String(input.sshPort)];
+  if (input.username?.trim()) args.push('-l', input.username.trim());
+  if (input.identityFile?.trim()) args.push('-i', input.identityFile.trim());
+  args.push('--', host);
+  const tunnel = spawnProcess('ssh.exe', args, { cwd: process.env.USERPROFILE, windowsHide: true, env: process.env, stdio: ['ignore', 'ignore', 'pipe'] });
+  forwardingSessions.set(socket, tunnel);
+  let stderr = '';
+  let tunnelReady = false;
+  tunnel.stderr?.on('data', chunk => {
+    stderr = (stderr + String(chunk)).slice(-3000);
+    if (!tunnelReady && /Local forwarding listening on/i.test(stderr)) {
+      tunnelReady = true;
+      send(socket, { type: 'started', localAddress: `127.0.0.1:${input.localPort}`, remoteAddress: `127.0.0.1:${input.remotePort}` });
+    }
+  });
+  tunnel.once('error', error => { forwardingSessions.delete(socket); send(socket, { type: 'error', message: `Unable to launch ssh.exe: ${error.message}` }); });
+  tunnel.once('close', (code, signal) => {
+    forwardingSessions.delete(socket);
+    if (socket.readyState === WebSocket.OPEN && code !== null && code !== 0) send(socket, { type: 'error', message: stderr.trim() || `SSH tunnel exited with code ${code}${signal ? ` (${signal})` : ''}.` });
+    else send(socket, { type: 'stopped' });
+  });
+}
+
 const server = createServer((req, res) => {
   const pathname = new URL(req.url ?? '/', 'http://localhost').pathname;
   if (pathname === '/health') {
@@ -89,12 +122,25 @@ const server = createServer((req, res) => {
 });
 const wss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 });
 server.on('upgrade', (request, socket, head) => {
-  if (request.url !== '/terminal' || !validOrigin(request.headers.origin)) {
+  if (!['/terminal', '/forward'].includes(request.url ?? '') || !validOrigin(request.headers.origin)) {
     socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return;
   }
-  wss.handleUpgrade(request, socket, head, ws => wss.emit('connection', ws));
+  wss.handleUpgrade(request, socket, head, ws => wss.emit('connection', ws, request));
 });
-wss.on('connection', socket => {
+wss.on('connection', (socket, request) => {
+  if (request.url === '/forward') {
+    socket.on('message', raw => {
+      let message: ForwardMessage;
+      try { message = JSON.parse(raw.toString()) as ForwardMessage; }
+      catch { send(socket, { type: 'error', message: 'Invalid forwarding message format.' }); return; }
+      try {
+        if (message.type === 'start') startForwarding(socket, message);
+        else if (message.type === 'stop') { const tunnel = forwardingSessions.get(socket); if (tunnel) { forwardingSessions.delete(socket); tunnel.kill(); } send(socket, { type: 'stopped' }); }
+      } catch (error) { send(socket, { type: 'error', message: error instanceof Error ? error.message : 'Unable to start SSH forwarding.' }); }
+    });
+    socket.on('close', () => { const tunnel = forwardingSessions.get(socket); if (tunnel) { forwardingSessions.delete(socket); tunnel.kill(); } });
+    return;
+  }
   socket.on('message', raw => {
     let message: ClientMessage;
     try { message = JSON.parse(raw.toString()) as ClientMessage; }

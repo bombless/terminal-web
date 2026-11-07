@@ -44,3 +44,27 @@
 .recent-foot{display:flex;align-items:center;gap:7px;margin-top:auto;padding-top:15px;border-top:1px solid #303030;color:#777;font-size:10px}
 @media(max-width:900px){.start-panels{grid-template-columns:1fr}.recent-empty{min-height:150px}.terminal-workspace{justify-content:flex-start}}
 @media(max-width:760px){.start-connect-panel,.recent-panel{padding:17px}.start-panels{gap:12px}.workspace-heading{margin-bottom:18px}.recent-empty{min-height:125px}}
+
+/* SSH TCP port forwarding */
+.forward-panel{gap:0}
+.forward-panel .start-panel-heading{margin-bottom:22px}
+.forward-label{display:block;min-width:0;flex:1;font:9px 'DM Mono',monospace;letter-spacing:1px;color:#aaa;margin-bottom:16px}
+.forward-label input,.forward-label select{display:block;width:100%;height:39px;margin-top:7px;border:1px solid #454545;border-radius:7px;background:#202020;color:#eee;padding:0 10px;outline:none;font:12px 'DM Sans',sans-serif;letter-spacing:0}
+.forward-label input:focus,.forward-label select:focus{border-color:#829c88;box-shadow:0 0 0 2px #829c8820}
+.forward-label input::placeholder{color:#666}
+.forward-label input:disabled,.forward-label select:disabled{opacity:.65;cursor:not-allowed}
+.forward-port-row{display:flex;align-items:center;gap:10px}
+.forward-arrow{height:39px;display:flex;align-items:center;color:#8caa94;margin-top:0;padding-top:13px}
+.forward-explainer{display:flex;align-items:flex-start;gap:8px;padding:11px;border:1px solid #344239;background:#28322b;border-radius:7px;color:#a2c0a9;font-size:10px;line-height:1.6;margin:0 0 15px}
+.forward-explainer svg{flex-shrink:0}
+.forward-explainer b{font-family:'DM Mono',monospace;font-weight:500;color:#c4ddca}
+.forward-idle,.forward-running{min-height:34px;display:flex;align-items:center;gap:8px;color:#888;font-size:10px;margin-bottom:10px}
+.forward-running{color:#9bc5a5}
+.forward-running b{margin-left:auto;font:10px 'DM Mono',monospace;color:#c4ddca}
+.stop-forward-button{background:#4a2929;color:#f0c1bc}
+.stop-forward-button:hover{background:#603434}
+@media(max-width:900px){.forward-port-row{gap:8px}.forward-arrow{display:none}}
+@media(max-width:760px){.forward-panel .start-panel-heading{margin-bottom:17px}.forward-port-row{gap:10px}.forward-label{margin-bottom:13px}}
+
+/* Active SSH forwarding shown at the bottom of the sidebar */
+.sidebar-forwards{margin:0 2px 10px;padding:10px;border:1px solid #344239;background:#202922;border-radius:8px}.sidebar-forward-heading{display:flex;align-items:center;gap:7px;color:#91b99a;font:9px 'DM Mono',monospace;letter-spacing:.8px;margin-bottom:9px}.sidebar-forward-row{display:flex;align-items:flex-start;gap:8px;color:#a8c8af}.sidebar-forward-row>svg{flex:0 0 auto;margin-top:2px}.sidebar-forward-row strong,.sidebar-forward-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px}.sidebar-forward-row strong{font:11px 'DM Mono',monospace;color:#d5e6d8}.sidebar-forward-row small{margin-top:4px;font:9px 'DM Mono',monospace;color:#8b9c8e}
