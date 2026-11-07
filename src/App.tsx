@@ -35,11 +35,16 @@ export default function App() {
   const [activeForward, setActiveForward] = useState<{ host: string; username: string; remotePort: number; localPort: number } | null>(null);
   const [showForwarding, setShowForwarding] = useState(false);
   const forwardSocket = useRef<WebSocket | null>(null);
-  const terminalRef = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
+  const activeIdRef = useRef(activeId);
+  activeIdRef.current = activeId;
+  const terminalInstances = useRef(new Map<string, Terminal>());
+  const terminalFits = useRef(new Map<string, FitAddon>());
+  const terminalMounts = useRef(new Map<string, HTMLDivElement>());
+  const terminalObservers = useRef(new Map<string, ResizeObserver>());
   const socket = useRef<WebSocket | null>(null);
   const sessionSockets = useRef(new Map<string, WebSocket>());
-  const terminalBuffers = useRef(new Map<string, string>());
+
   const active = sessions.find(item => item.id === activeId) ?? sessions[0];
   const recentSshSessions = sessions.filter(item => item.shell !== 'pwsh' && item.host.trim()).sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -51,37 +56,63 @@ export default function App() {
 
   const closeSocket = useCallback(() => { socket.current?.close(); socket.current = null; setStatus('idle'); }, []);
 
+  // Keep one live xterm emulator and DOM mount per session. Switching tabs only
+  // changes visibility; it never destroys the emulator or replays its transcript.
   useEffect(() => {
-    if (!terminalRef.current) return;
-    const terminal = new Terminal({
-      cursorBlink: true, convertEol: false, fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
-      fontSize: 13, lineHeight: 1.35, scrollback: 5000, allowProposedApi: true,
-      theme: { background: '#171717', foreground: '#e5e5e5', cursor: '#f5f5f5', cursorAccent: '#171717', selectionBackground: '#454545', black: '#171717', red: '#f87171', green: '#4ade80', yellow: '#facc15', blue: '#60a5fa', magenta: '#c084fc', cyan: '#67e8f9', white: '#e5e5e5', brightBlack: '#737373', brightRed: '#fca5a5', brightGreen: '#86efac', brightYellow: '#fde68a', brightBlue: '#93c5fd', brightMagenta: '#d8b4fe', brightCyan: '#a5f3fc', brightWhite: '#fafafa' }
+    const liveIds = new Set(sessions.map(item => item.id));
+    sessions.forEach(item => {
+      if (terminalInstances.current.has(item.id)) return;
+      const mount = terminalMounts.current.get(item.id);
+      if (!mount) return;
+      const terminal = new Terminal({
+        cursorBlink: true, convertEol: false, fontFamily: '"Cascadia Code", "JetBrains Mono", Consolas, monospace',
+        fontSize: 13, lineHeight: 1.35, scrollback: 5000, allowProposedApi: true,
+        theme: { background: '#171717', foreground: '#e5e5e5', cursor: '#f5f5f5', cursorAccent: '#171717', selectionBackground: '#454545', black: '#171717', red: '#f87171', green: '#4ade80', yellow: '#facc15', blue: '#60a5fa', magenta: '#c084fc', cyan: '#67e8f9', white: '#e5e5e5', brightBlack: '#737373', brightRed: '#fca5a5', brightGreen: '#86efac', brightYellow: '#fde68a', brightBlue: '#93c5fd', brightMagenta: '#d8b4fe', brightCyan: '#a5f3fc', brightWhite: '#fafafa' }
+      });
+      const fit = new FitAddon();
+      terminal.loadAddon(fit); terminal.loadAddon(new WebLinksAddon()); terminal.open(mount);
+      terminalInstances.current.set(item.id, terminal); terminalFits.current.set(item.id, fit);
+      terminal.onData(data => {
+        if (activeIdRef.current !== item.id) return;
+        const activeSocket = sessionSockets.current.get(item.id);
+        if (activeSocket?.readyState === WebSocket.OPEN) activeSocket.send(JSON.stringify({ type: 'data', data }));
+      });
+      const observer = new ResizeObserver(() => {
+        if (activeIdRef.current !== item.id || mount.offsetParent === null) return;
+        fit.fit();
+        const activeSocket = sessionSockets.current.get(item.id);
+        if (activeSocket?.readyState === WebSocket.OPEN) activeSocket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+      });
+      observer.observe(mount); terminalObservers.current.set(item.id, observer);
     });
-    const fit = new FitAddon(); terminal.loadAddon(fit); terminal.loadAddon(new WebLinksAddon()); terminal.open(terminalRef.current);
-    term.current = terminal; requestAnimationFrame(() => fit.fit());
-    const observer = new ResizeObserver(() => {
+    for (const [id, terminal] of terminalInstances.current) {
+      if (liveIds.has(id)) continue;
+      terminalObservers.current.get(id)?.disconnect(); terminalObservers.current.delete(id);
+      terminal.dispose(); terminalInstances.current.delete(id); terminalFits.current.delete(id);
+    }
+    term.current = terminalInstances.current.get(activeId) ?? null;
+  }, [sessions, activeId]);
+
+  useEffect(() => {
+    const terminal = terminalInstances.current.get(activeId);
+    const fit = terminalFits.current.get(activeId);
+    term.current = terminal ?? null;
+    if (!terminal || !fit || status !== 'connected' || showForwarding) return;
+    requestAnimationFrame(() => {
       fit.fit();
-      if (socket.current?.readyState === WebSocket.OPEN) socket.current.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
-    });
-    observer.observe(terminalRef.current);
-    const bufferedOutput = terminalBuffers.current.get(activeId);
-    // Replaying a terminal transcript can trigger xterm device-query replies
-    // (for example DA1: ESC[?1;2c). Those are emulator responses, not user
-    // keystrokes, and must never be sent back to the live SSH shell.
-    let replaying = Boolean(bufferedOutput);
-    const input = terminal.onData(data => {
-      if (replaying) return;
       const activeSocket = sessionSockets.current.get(activeId);
-      if (activeSocket?.readyState === WebSocket.OPEN) activeSocket.send(JSON.stringify({ type: 'data', data }));
+      if (activeSocket?.readyState === WebSocket.OPEN) activeSocket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
+      terminal.focus();
     });
-    if (bufferedOutput) terminal.write(bufferedOutput, () => { replaying = false; });
-    return () => { input.dispose(); observer.disconnect(); terminal.dispose(); term.current = null; };
-  }, [activeId, status === 'connected']);
+  }, [activeId, status, showForwarding]);
 
   useEffect(() => () => {
     sessionSockets.current.forEach(ws => ws.close());
     sessionSockets.current.clear();
+    terminalObservers.current.forEach(observer => observer.disconnect());
+    terminalObservers.current.clear();
+    terminalInstances.current.forEach(terminal => terminal.dispose());
+    terminalInstances.current.clear();
     closeSocket();
   }, [closeSocket]);
 
@@ -99,30 +130,30 @@ export default function App() {
     sessionSockets.current.delete(sessionId);
     socket.current = null;
     setError(''); setStatus('connecting'); setShowConnect(false);
-    term.current?.clear();
-    terminalBuffers.current.set(sessionId, '');
+    terminalInstances.current.get(sessionId)?.clear();
     const ws = new WebSocket('ws://127.0.0.1:8700/terminal'); socket.current = ws;
     sessionSockets.current.set(sessionId, ws);
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'connect', shell: targetShell, host: targetHost.trim(), username: targetUsername.trim(), port: sshPort, identityFile: targetIdentity.trim(), cols: term.current?.cols ?? 100, rows: term.current?.rows ?? 30 }));
+    ws.onopen = () => {
+      const terminal = terminalInstances.current.get(sessionId);
+      ws.send(JSON.stringify({ type: 'connect', shell: targetShell, host: targetHost.trim(), username: targetUsername.trim(), port: sshPort, identityFile: targetIdentity.trim(), cols: terminal?.cols ?? 100, rows: terminal?.rows ?? 30 }));
+    };
     ws.onmessage = event => {
       const message = JSON.parse(String(event.data)) as { type: string; data?: string; message?: string; exitCode?: number };
       if (message.type === 'data' && message.data) {
-        const previous = terminalBuffers.current.get(sessionId) ?? '';
-        terminalBuffers.current.set(sessionId, (previous + message.data).slice(-1_000_000));
-        if (activeId === sessionId) term.current?.write(message.data);
+        terminalInstances.current.get(sessionId)?.write(message.data);
       }
       if (message.type === 'status') {
-        if (activeId === sessionId) setStatus('connected');
+        if (activeIdRef.current === sessionId) setStatus('connected');
         setSessions(current => current.map(item => item.id === sessionId ? { ...item, title: targetShell === 'pwsh' ? 'Local PowerShell' : targetHost.trim(), host: targetHost.trim(), username: targetUsername.trim(), port: sshPort, identityFile: targetIdentity.trim(), shell: targetShell, updatedAt: Date.now() } : item));
-        if (activeId === sessionId) term.current?.focus();
+        if (activeIdRef.current === sessionId) requestAnimationFrame(() => terminalInstances.current.get(sessionId)?.focus());
       }
-      if (message.type === 'error' && activeId === sessionId) { setError(message.message ?? 'Unable to start terminal session.'); setStatus('error'); setShowConnect(true); }
+      if (message.type === 'error' && activeIdRef.current === sessionId) { setError(message.message ?? 'Unable to start terminal session.'); setStatus('error'); setShowConnect(true); }
       if (message.type === 'exit') {
-        if (activeId === sessionId) { setStatus('idle'); term.current?.writeln('\r\n\x1b[90mTerminal session ended.\x1b[0m'); }
+        if (activeIdRef.current === sessionId) { setStatus('idle'); terminalInstances.current.get(sessionId)?.writeln('\r\n\x1b[90mTerminal session ended.\x1b[0m'); }
         sessionSockets.current.delete(sessionId);
       }
     };
-    ws.onerror = () => { if (activeId === sessionId) { setError('Cannot reach the local SSH bridge. Start the app with npm run dev.'); setStatus('error'); setShowConnect(true); } };
+    ws.onerror = () => { if (activeIdRef.current === sessionId) { setError('Cannot reach the local SSH bridge. Start the app with npm run dev.'); setStatus('error'); setShowConnect(true); } };
     ws.onclose = () => { if (socket.current === ws) socket.current = null; if (sessionSockets.current.get(sessionId) === ws) sessionSockets.current.delete(sessionId); };
   };
 
@@ -143,7 +174,7 @@ export default function App() {
     const remaining = sessions.filter(item => item.id !== id);
     sessionSockets.current.get(id)?.close();
     sessionSockets.current.delete(id);
-    terminalBuffers.current.delete(id);
+
     setSessions(remaining);
     if (activeId === id) {
       const next = remaining[0];
@@ -235,11 +266,11 @@ export default function App() {
             <div className="recent-foot"><ShieldCheck size={14}/> SSH -L · Bound to 127.0.0.1 only</div>
           </section>
         </div>}
-        {status === 'connected' && !showForwarding && <div className="terminal-card">
+        <div className="terminal-card" style={{ display: status === 'connected' && !showForwarding ? undefined : 'none' }}>
           <div className="terminal-toolbar"><div className="window-controls"><i/><i/><i/></div><div className="terminal-caption"><Activity size={13}/><span>{active?.shell === 'pwsh' ? 'LOCAL POWERSHELL' : active?.host || 'LOCAL TERMINAL'}</span><span className="caption-separator">·</span><span>{status === 'connected' ? (active?.shell === 'pwsh' ? 'PWSH' : 'SSH') : 'AWAITING CONNECTION'}</span></div><button className="toolbar-button" onClick={() => term.current?.clear()} title="Clear terminal"><Command size={14}/></button></div>
-          <div className="terminal-screen"><div className="terminal-mount" ref={terminalRef}/>{status !== 'connected' && !showConnect && <div className="terminal-empty"><div className="empty-glyph"><TerminalSquare size={24}/></div><strong>Ready when you are.</strong><span>Start a local shell or connect to a remote host.</span><button onClick={() => setShowConnect(true)}>Configure terminal session <Plus size={14}/></button></div>}</div>
+          <div className="terminal-screen">{sessions.map(item => <div key={item.id} className="terminal-mount" ref={node => { if (node) terminalMounts.current.set(item.id, node); else terminalMounts.current.delete(item.id); }} style={{ display: item.id === activeId ? 'block' : 'none' }}/>)}</div>
           <div className="terminal-footer"><span><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'SESSION ACTIVE' : 'AWAITING CONNECTION'}</span><span>xterm.js <b>·</b> UTF-8 <b>·</b> {status === 'connected' ? 'INTERACTIVE PTY' : 'LOCAL'}</span></div>
-        </div>}
+        </div>
         {status === 'connected' && !showForwarding && <div className="hint-row"><span><kbd>Ctrl</kbd> + <kbd>C</kbd> <span>Interrupt process</span></span><span><kbd>Ctrl</kbd> + <kbd>L</kbd> <span>Clear screen</span></span><span><Monitor size={13}/> Resize-aware PTY</span></div>}
       </section>
       <footer className="page-footer"><span>Built for the command line.</span><span><span className="footer-dot"/> All traffic stays on your local machine until you connect.</span></footer>
