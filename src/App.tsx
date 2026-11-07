@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Activity, ArrowLeftRight, ChevronDown, CircleHelp, Command, Menu, Monitor, Play, Plus, Server, Settings2, ShieldCheck, Square, SquareTerminal, TerminalSquare, Trash2, X } from 'lucide-react';
+import { Activity, ArrowLeftRight, ChevronDown, Command, Menu, Monitor, Play, Plus, Server, ShieldCheck, Square, SquareTerminal, TerminalSquare, Trash2, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -148,14 +148,13 @@ export default function App() {
       <div className="session-list">{sessions.map(item => <div key={item.id} className={`session-row ${item.id === activeId ? 'selected' : ''}`}><button type="button" className={`session-item ${item.id === activeId ? 'selected' : ''}`} onClick={() => selectSession(item)}><TerminalSquare size={15}/><span>{item.title || 'New connection'}</span></button><button type="button" className="session-delete" onClick={() => deleteSession(item.id)} aria-label={`Delete ${item.title || 'New connection'}`} title="Delete session"><Trash2 size={14}/></button></div>)}</div>
       <div className="sidebar-bottom">
         {activeForward && <button type="button" className={`sidebar-forwards ${showForwarding ? 'selected' : ''}`} onClick={() => setShowForwarding(true)} aria-label="Open SSH Port Forwarding settings"><span className="sidebar-forward-heading"><span className="state-dot live"/> ACTIVE PORT FORWARD</span><span className="sidebar-forward-row"><ArrowLeftRight size={14}/><span><strong>localhost:{activeForward.localPort}</strong><small>→ {activeForward.host}:{activeForward.remotePort}</small></span></span></button>}
-        <div className="local-card"><div className="local-icon"><ShieldCheck size={17}/></div><div><strong>Private by design</strong><small>Keys stay on your machine</small></div><span className="online-dot"/></div>
-        <button className="profile-row"><div className="avatar">T</div><span><b>Local workspace</b><small>Windows · PowerShell / SSH</small></span><Settings2 size={17}/></button>
+
       </div>
     </aside>
     <main className="main-panel">
       <header className="topbar">
         <div className="top-left">{!sidebarOpen && <button className="icon-button" onClick={() => setSidebarOpen(true)} aria-label="Open sidebar"><Menu size={18}/></button>}<span className="breadcrumb">Workspace</span><span className="crumb-divider">/</span><strong>{active?.title || 'New connection'}</strong><ChevronDown size={14} className="muted-icon"/></div>
-        <div className="top-right"><span className="bridge-state"><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Local bridge'}</span><button className="icon-button" title="Help"><CircleHelp size={17}/></button><div className="top-avatar">T</div></div>
+        <div className="top-right"><span className="bridge-state"><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Local bridge'}</span></div>
       </header>
       <section className="terminal-workspace">
         <div className="workspace-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> INTERACTIVE SESSION</div><h1>{status === 'connected' && active?.title ? active.title : 'Your terminal, anywhere.'}</h1><p>A focused workspace for local PowerShell and remote SSH sessions.</p></div><div className="workspace-actions"><span className="clock">{clock}</span><button className="connect-button" onClick={() => { closeSocket(); setStatus('idle'); }}><Plus size={15}/> Connect</button></div></div>
