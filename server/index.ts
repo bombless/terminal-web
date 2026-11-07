@@ -63,16 +63,16 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
     // Use node-pty's bundled ConPTY DLL on Windows. The system-ConPTY cleanup path
     // forks conpty_console_list_agent, whose AttachConsole can fail for a shell
     // that has already detached/exited and produces an uncaught child-process error.
-    useConptyDll: process.platform === 'win32',
+    useConptyDll: true,
     env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
   });
   sessions.set(socket, terminal);
-  // Strip ConPTY startup handshake sequences on Windows (such as \x1b[1t, \x1b[c, \x1b[?1004h, \x1b[?9001h).
+  // Strip ConPTY startup handshake sequences (such as \x1b[1t, \x1b[c, \x1b[?1004h, \x1b[?9001h).
   // Without filtering, the premature \x1b[c triggers an xterm.js Primary Device Attributes response
   // (\x1b[?1;2c) before SSH is ready to receive input, which later leaks into interactive CLI sessions
   // (e.g. pi) as stray "[?1;2c" text.
-  let isStartupPhase = process.platform === 'win32';
-  const startupTimer = isStartupPhase ? setTimeout(() => { isStartupPhase = false; }, 2500) : null;
+  let isStartupPhase = true;
+  const startupTimer = setTimeout(() => { isStartupPhase = false; }, 2500);
 
   terminal.onData(data => {
     let payload = data;
@@ -86,7 +86,7 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
     if (payload) send(socket, { type: 'data', data: payload });
   });
   terminal.onExit(({ exitCode, signal }) => {
-    if (startupTimer) clearTimeout(startupTimer);
+    clearTimeout(startupTimer);
     sessions.delete(socket);
     send(socket, { type: 'exit', exitCode, signal });
   });
