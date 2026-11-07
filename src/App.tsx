@@ -33,6 +33,7 @@ export default function App() {
   const [forwardError, setForwardError] = useState('');
   const [forwardAddress, setForwardAddress] = useState('');
   const [activeForward, setActiveForward] = useState<{ host: string; username: string; remotePort: number; localPort: number } | null>(null);
+  const [showForwarding, setShowForwarding] = useState(false);
   const forwardSocket = useRef<WebSocket | null>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
@@ -123,7 +124,7 @@ export default function App() {
   const stopForwarding = () => {
     const ws = forwardSocket.current;
     if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'stop' }));
-    ws?.close(); forwardSocket.current = null; setForwardStatus('idle'); setForwardError(''); setActiveForward(null);
+    ws?.close(); forwardSocket.current = null; setForwardStatus('idle'); setForwardError(''); setActiveForward(null); setShowForwarding(false);
   };
 
   return <div className="app-shell">
@@ -133,7 +134,7 @@ export default function App() {
       <div className="side-label">YOUR SESSIONS</div>
       <div className="session-list">{sessions.map(item => <button key={item.id} className={`session-item ${item.id === activeId ? 'selected' : ''}`} onClick={() => selectSession(item)}><TerminalSquare size={15}/><span>{item.title || 'New connection'}</span></button>)}</div>
       <div className="sidebar-bottom">
-        {activeForward && <div className="sidebar-forwards"><div className="sidebar-forward-heading"><span className="state-dot live"/> ACTIVE PORT FORWARD</div><div className="sidebar-forward-row"><ArrowLeftRight size={14}/><div><strong>localhost:{activeForward.localPort}</strong><small>→ {activeForward.host}:{activeForward.remotePort}</small></div></div></div>}
+        {activeForward && <button type="button" className={`sidebar-forwards ${showForwarding ? 'selected' : ''}`} onClick={() => setShowForwarding(true)} aria-label="Open SSH Port Forwarding settings"><span className="sidebar-forward-heading"><span className="state-dot live"/> ACTIVE PORT FORWARD</span><span className="sidebar-forward-row"><ArrowLeftRight size={14}/><span><strong>localhost:{activeForward.localPort}</strong><small>→ {activeForward.host}:{activeForward.remotePort}</small></span></span></button>}
         <div className="local-card"><div className="local-icon"><ShieldCheck size={17}/></div><div><strong>Private by design</strong><small>Keys stay on your machine</small></div><span className="online-dot"/></div>
         <button className="profile-row"><div className="avatar">T</div><span><b>Local workspace</b><small>Windows · PowerShell / SSH</small></span><Settings2 size={17}/></button>
       </div>
@@ -145,7 +146,19 @@ export default function App() {
       </header>
       <section className="terminal-workspace">
         <div className="workspace-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> INTERACTIVE SESSION</div><h1>{status === 'connected' && active?.title ? active.title : 'Your terminal, anywhere.'}</h1><p>A focused workspace for local PowerShell and remote SSH sessions.</p></div><div className="workspace-actions"><span className="clock">{clock}</span><button className="connect-button" onClick={() => { closeSocket(); setStatus('idle'); }}><Plus size={15}/> Connect</button></div></div>
-        {status !== 'connected' && <div className="start-panels">
+        {showForwarding && activeForward && <div className="start-panels forwarding-detail-panels">
+          <section className="recent-panel forward-panel forwarding-detail-card">
+            <div className="start-panel-heading"><div className="start-panel-icon recent-icon"><ArrowLeftRight size={18}/></div><div><h2>SSH Port Forwarding</h2><p>Manage your active secure TCP tunnel</p></div></div>
+            <label className="forward-label">SSH SERVER<input value={`${activeForward.username ? `${activeForward.username}@` : ''}${activeForward.host}`} readOnly/></label>
+            <div className="forward-port-row"><label className="forward-label">REMOTE TCP PORT<input value={String(activeForward.remotePort)} readOnly/></label><div className="forward-arrow"><ArrowLeftRight size={17}/></div><label className="forward-label">LOCAL PORT<input value={String(activeForward.localPort)} readOnly/></label></div>
+            <div className="forward-explainer"><ShieldCheck size={15}/><span>Secure tunnel: <b>localhost:{activeForward.localPort}</b> → remote service <b>127.0.0.1:{activeForward.remotePort}</b></span></div>
+            <div className="forward-running"><span className="state-dot live"/> Forwarding active <b>localhost:{activeForward.localPort}</b></div>
+            <button type="button" className="submit-button stop-forward-button" onClick={stopForwarding}><Square size={14}/> Stop Forwarding</button>
+            <button type="button" className="forward-back-button" onClick={() => setShowForwarding(false)}>Back to terminal</button>
+            <div className="recent-foot"><ShieldCheck size={14}/> SSH -L · Bound to 127.0.0.1 only</div>
+          </section>
+        </div>}
+        {status !== 'connected' && !showForwarding && <div className="start-panels">
           <form className="start-connect-panel" onSubmit={connect}>
             <div className="start-panel-heading"><div className="start-panel-icon"><Plus size={18}/></div><div><h2>New connection</h2><p>Connect to a remote SSH server</p></div></div>
             <label>SHELL<select value={shell} onChange={e => setShell(e.target.value as 'ssh' | 'pwsh')}><option value="ssh">SSH · Remote server</option><option value="pwsh">PowerShell 7 · Local (pwsh.exe)</option></select></label>
@@ -169,12 +182,12 @@ export default function App() {
             <div className="recent-foot"><ShieldCheck size={14}/> SSH -L · Bound to 127.0.0.1 only</div>
           </section>
         </div>}
-        {status === 'connected' && <div className="terminal-card">
+        {status === 'connected' && !showForwarding && <div className="terminal-card">
           <div className="terminal-toolbar"><div className="window-controls"><i/><i/><i/></div><div className="terminal-caption"><Activity size={13}/><span>{active?.shell === 'pwsh' ? 'LOCAL POWERSHELL' : active?.host || 'LOCAL TERMINAL'}</span><span className="caption-separator">·</span><span>{status === 'connected' ? (active?.shell === 'pwsh' ? 'PWSH' : 'SSH') : 'AWAITING CONNECTION'}</span></div><button className="toolbar-button" onClick={() => term.current?.clear()} title="Clear terminal"><Command size={14}/></button></div>
           <div className="terminal-screen"><div className="terminal-mount" ref={terminalRef}/>{status !== 'connected' && !showConnect && <div className="terminal-empty"><div className="empty-glyph"><TerminalSquare size={24}/></div><strong>Ready when you are.</strong><span>Start a local shell or connect to a remote host.</span><button onClick={() => setShowConnect(true)}>Configure terminal session <Plus size={14}/></button></div>}</div>
           <div className="terminal-footer"><span><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'SESSION ACTIVE' : 'AWAITING CONNECTION'}</span><span>xterm.js <b>·</b> UTF-8 <b>·</b> {status === 'connected' ? 'INTERACTIVE PTY' : 'LOCAL'}</span></div>
         </div>}
-        {status === 'connected' && <div className="hint-row"><span><kbd>Ctrl</kbd> + <kbd>C</kbd> <span>Interrupt process</span></span><span><kbd>Ctrl</kbd> + <kbd>L</kbd> <span>Clear screen</span></span><span><Monitor size={13}/> Resize-aware PTY</span></div>}
+        {status === 'connected' && !showForwarding && <div className="hint-row"><span><kbd>Ctrl</kbd> + <kbd>C</kbd> <span>Interrupt process</span></span><span><kbd>Ctrl</kbd> + <kbd>L</kbd> <span>Clear screen</span></span><span><Monitor size={13}/> Resize-aware PTY</span></div>}
       </section>
       <footer className="page-footer"><span>Built for the command line.</span><span><span className="footer-dot"/> All traffic stays on your local machine until you connect.</span></footer>
     </main>
