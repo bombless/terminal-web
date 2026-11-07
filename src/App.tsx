@@ -289,7 +289,6 @@ export default function App() {
         </div>
         {status === 'connected' && !showForwarding && <div className="hint-row"><span><kbd>Ctrl</kbd> + <kbd>C</kbd> <span>Interrupt process</span></span><span><Monitor size={13}/> Resize-aware PTY</span></div>}
       </section>
-      <footer className="page-footer"><span>Built for the command line.</span><span><span className="footer-dot"/> All traffic stays on your local machine until you connect.</span></footer>
     </main>
     {showConnect && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setShowConnect(false); }}>
       <form className="connect-modal" onSubmit={connect}>
