@@ -5,7 +5,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 
-type SavedSession = { id: string; title: string; host: string; username: string; port: number; identityFile: string; updatedAt: number };
+type SavedSession = { id: string; title: string; host: string; username: string; port: number; identityFile: string; shell?: 'ssh' | 'pwsh'; updatedAt: number };
 const STORAGE_KEY = 'terminal-web.sessions';
 const starter: SavedSession[] = [{ id: 'welcome', title: 'New connection', host: '', username: '', port: 22, identityFile: '', updatedAt: Date.now() }];
 function loadSessions(): SavedSession[] {
@@ -22,9 +22,10 @@ export default function App() {
   const [username, setUsername] = useState(sessions[0]?.username ?? '');
   const [port, setPort] = useState(String(sessions[0]?.port ?? 22));
   const [identityFile, setIdentityFile] = useState(sessions[0]?.identityFile ?? '');
+  const [shell, setShell] = useState<'ssh' | 'pwsh'>(sessions[0]?.shell ?? 'ssh');
   const [status, setStatus] = useState<'idle' | 'connecting' | 'connected' | 'error'>('idle');
   const [error, setError] = useState('');
-  const [clock, setClock] = useState('SSH TERMINAL');
+  const [clock, setClock] = useState('TERMINAL');
   const terminalRef = useRef<HTMLDivElement>(null);
   const term = useRef<Terminal | null>(null);
   const socket = useRef<WebSocket | null>(null);
@@ -60,32 +61,32 @@ export default function App() {
 
   const connect = (event: FormEvent) => {
     event.preventDefault();
-    if (!host.trim()) { setError('Please enter a host name or IP address.'); return; }
+    if (shell === 'ssh' && !host.trim()) { setError('Please enter a host name or IP address.'); return; }
     const sshPort = Number(port);
-    if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) { setError('Port must be between 1 and 65535.'); return; }
+    if (shell === 'ssh' && (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535)) { setError('Port must be between 1 and 65535.'); return; }
     closeSocket(); setError(''); setStatus('connecting'); setShowConnect(false);
     term.current?.clear();
     const ws = new WebSocket('ws://127.0.0.1:8700/terminal'); socket.current = ws;
-    ws.onopen = () => ws.send(JSON.stringify({ type: 'connect', host: host.trim(), username: username.trim(), port: sshPort, identityFile: identityFile.trim(), cols: term.current?.cols ?? 100, rows: term.current?.rows ?? 30 }));
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'connect', shell, host: host.trim(), username: username.trim(), port: sshPort, identityFile: identityFile.trim(), cols: term.current?.cols ?? 100, rows: term.current?.rows ?? 30 }));
     ws.onmessage = event => {
       const message = JSON.parse(String(event.data)) as { type: string; data?: string; message?: string; exitCode?: number };
       if (message.type === 'data' && message.data) term.current?.write(message.data);
       if (message.type === 'status') { setStatus('connected'); term.current?.focus(); }
-      if (message.type === 'error') { setError(message.message ?? 'SSH connection failed.'); setStatus('error'); setShowConnect(true); }
-      if (message.type === 'exit') { setStatus('idle'); term.current?.writeln('\r\n\x1b[90mSSH session ended.\x1b[0m'); }
+      if (message.type === 'error') { setError(message.message ?? 'Unable to start terminal session.'); setStatus('error'); setShowConnect(true); }
+      if (message.type === 'exit') { setStatus('idle'); term.current?.writeln('\r\n\x1b[90mTerminal session ended.\x1b[0m'); }
     };
     ws.onerror = () => { setError('Cannot reach the local SSH bridge. Start the app with npm run dev.'); setStatus('error'); setShowConnect(true); };
     ws.onclose = () => { if (socket.current === ws) socket.current = null; };
-    setSessions(current => current.map(item => item.id === activeId ? { ...item, title: host.trim(), host: host.trim(), username: username.trim(), port: sshPort, identityFile: identityFile.trim(), updatedAt: Date.now() } : item));
+    setSessions(current => current.map(item => item.id === activeId ? { ...item, title: shell === 'pwsh' ? 'Local PowerShell' : host.trim(), host: host.trim(), username: username.trim(), port: sshPort, identityFile: identityFile.trim(), shell, updatedAt: Date.now() } : item));
   };
 
   const newSession = () => {
     const item: SavedSession = { id: crypto.randomUUID(), title: 'New connection', host: '', username: '', port: 22, identityFile: '', updatedAt: Date.now() };
-    setSessions(current => [item, ...current]); setActiveId(item.id); setHost(''); setUsername(''); setPort('22'); setIdentityFile('');
+    setSessions(current => [item, ...current]); setActiveId(item.id); setHost(''); setUsername(''); setPort('22'); setIdentityFile(''); setShell('ssh');
     setError(''); setStatus('idle'); setShowConnect(true); closeSocket();
   };
   const selectSession = (item: SavedSession) => {
-    closeSocket(); setActiveId(item.id); setHost(item.host); setUsername(item.username); setPort(String(item.port)); setIdentityFile(item.identityFile);
+    closeSocket(); setActiveId(item.id); setHost(item.host); setUsername(item.username); setPort(String(item.port)); setIdentityFile(item.identityFile); setShell(item.shell ?? 'ssh');
     setError(''); setShowConnect(true);
   };
 
@@ -97,7 +98,7 @@ export default function App() {
       <div className="session-list">{sessions.map(item => <button key={item.id} className={`session-item ${item.id === activeId ? 'selected' : ''}`} onClick={() => selectSession(item)}><TerminalSquare size={15}/><span>{item.title || 'New connection'}</span></button>)}</div>
       <div className="sidebar-bottom">
         <div className="local-card"><div className="local-icon"><ShieldCheck size={17}/></div><div><strong>Private by design</strong><small>Keys stay on your machine</small></div><span className="online-dot"/></div>
-        <button className="profile-row"><div className="avatar">T</div><span><b>Local workspace</b><small>Windows · SSH</small></span><Settings2 size={17}/></button>
+        <button className="profile-row"><div className="avatar">T</div><span><b>Local workspace</b><small>Windows · PowerShell / SSH</small></span><Settings2 size={17}/></button>
       </div>
     </aside>
     <main className="main-panel">
@@ -106,10 +107,10 @@ export default function App() {
         <div className="top-right"><span className="bridge-state"><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'Connected' : status === 'connecting' ? 'Connecting' : 'Local bridge'}</span><button className="icon-button" title="Help"><CircleHelp size={17}/></button><div className="top-avatar">T</div></div>
       </header>
       <section className="terminal-workspace">
-        <div className="workspace-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> INTERACTIVE SESSION</div><h1>{active?.title && active.title !== 'New connection' ? active.title : 'Your terminal, anywhere.'}</h1><p>A focused workspace for your remote machines.</p></div><div className="workspace-actions"><span className="clock">{clock}</span><button className="connect-button" onClick={() => setShowConnect(true)}><Plus size={15}/> Connect</button></div></div>
+        <div className="workspace-heading"><div><div className="eyebrow"><span className="eyebrow-dot"/> INTERACTIVE SESSION</div><h1>{active?.title && active.title !== 'New connection' ? active.title : 'Your terminal, anywhere.'}</h1><p>A focused workspace for local PowerShell and remote SSH sessions.</p></div><div className="workspace-actions"><span className="clock">{clock}</span><button className="connect-button" onClick={() => setShowConnect(true)}><Plus size={15}/> Connect</button></div></div>
         <div className="terminal-card">
-          <div className="terminal-toolbar"><div className="window-controls"><i/><i/><i/></div><div className="terminal-caption"><Activity size={13}/><span>{active?.host || 'LOCAL TERMINAL'}</span><span className="caption-separator">·</span><span>{status === 'connected' ? 'SSH' : 'AWAITING CONNECTION'}</span></div><button className="toolbar-button" onClick={() => term.current?.clear()} title="Clear terminal"><Command size={14}/></button></div>
-          <div className="terminal-screen"><div className="terminal-mount" ref={terminalRef}/>{status !== 'connected' && !showConnect && <div className="terminal-empty"><div className="empty-glyph"><TerminalSquare size={24}/></div><strong>Ready when you are.</strong><span>Connect to a remote host to start an interactive session.</span><button onClick={() => setShowConnect(true)}>Configure SSH connection <Plus size={14}/></button></div>}</div>
+          <div className="terminal-toolbar"><div className="window-controls"><i/><i/><i/></div><div className="terminal-caption"><Activity size={13}/><span>{active?.shell === 'pwsh' ? 'LOCAL POWERSHELL' : active?.host || 'LOCAL TERMINAL'}</span><span className="caption-separator">·</span><span>{status === 'connected' ? (active?.shell === 'pwsh' ? 'PWSH' : 'SSH') : 'AWAITING CONNECTION'}</span></div><button className="toolbar-button" onClick={() => term.current?.clear()} title="Clear terminal"><Command size={14}/></button></div>
+          <div className="terminal-screen"><div className="terminal-mount" ref={terminalRef}/>{status !== 'connected' && !showConnect && <div className="terminal-empty"><div className="empty-glyph"><TerminalSquare size={24}/></div><strong>Ready when you are.</strong><span>Start a local shell or connect to a remote host.</span><button onClick={() => setShowConnect(true)}>Configure terminal session <Plus size={14}/></button></div>}</div>
           <div className="terminal-footer"><span><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'SESSION ACTIVE' : 'AWAITING CONNECTION'}</span><span>xterm.js <b>·</b> UTF-8 <b>·</b> {status === 'connected' ? 'INTERACTIVE PTY' : 'LOCAL'}</span></div>
         </div>
         <div className="hint-row"><span><kbd>Ctrl</kbd> + <kbd>C</kbd> <span>Interrupt process</span></span><span><kbd>Ctrl</kbd> + <kbd>L</kbd> <span>Clear screen</span></span><span><Monitor size={13}/> Resize-aware PTY</span></div>
@@ -119,14 +120,18 @@ export default function App() {
     {showConnect && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setShowConnect(false); }}>
       <form className="connect-modal" onSubmit={connect}>
         <div className="modal-head"><div className="modal-icon"><Server size={19}/></div><button type="button" className="icon-button" onClick={() => setShowConnect(false)} aria-label="Close"><X size={17}/></button></div>
-        <div className="modal-title">Connect to a server</div><p className="modal-description">Use your Windows OpenSSH client and its existing key configuration.</p>
-        <label>HOST<input autoFocus value={host} onChange={e => setHost(e.target.value)} placeholder="server.example.com"/></label>
-        <div className="form-grid"><label>USERNAME<input value={username} onChange={e => setUsername(e.target.value)} placeholder="Optional"/></label><label>PORT<input value={port} onChange={e => setPort(e.target.value)} inputMode="numeric"/></label></div>
-        <label>IDENTITY FILE<input value={identityFile} onChange={e => setIdentityFile(e.target.value)} placeholder="Optional · e.g. C:\\Users\\you\\.ssh\\id_ed25519"/></label>
-        <div className="ssh-note"><ShieldCheck size={15}/><span>Leave identity file empty to use ssh.exe defaults, ~/.ssh/config and ssh-agent.</span></div>
+        <div className="modal-title">Start a terminal session</div><p className="modal-description">Choose a local shell or connect to a remote SSH host.</p>
+        <label>SHELL<select value={shell} onChange={e => setShell(e.target.value as 'ssh' | 'pwsh')}><option value="ssh">SSH · Remote server</option><option value="pwsh">PowerShell 7 · Local (pwsh.exe)</option></select></label>
+        {shell === 'ssh' && <>
+          <label>HOST<input autoFocus value={host} onChange={e => setHost(e.target.value)} placeholder="server.example.com"/></label>
+          <div className="form-grid"><label>USERNAME<input value={username} onChange={e => setUsername(e.target.value)} placeholder="Optional"/></label><label>PORT<input value={port} onChange={e => setPort(e.target.value)} inputMode="numeric"/></label></div>
+          <label>IDENTITY FILE<input value={identityFile} onChange={e => setIdentityFile(e.target.value)} placeholder="Optional · e.g. C:\\Users\\you\\.ssh\\id_ed25519"/></label>
+          <div className="ssh-note"><ShieldCheck size={15}/><span>Leave identity file empty to use ssh.exe defaults, ~/.ssh/config and ssh-agent.</span></div>
+        </>}
+        {shell === 'pwsh' && <div className="ssh-note"><ShieldCheck size={15}/><span>Starts pwsh.exe on this Windows machine in your user profile directory. PowerShell profiles and interactive commands are enabled.</span></div>}
         {error && <div className="error-message">{error}</div>}
-        <button className="submit-button" type="submit" disabled={status === 'connecting'}>{status === 'connecting' ? 'Connecting…' : 'Start SSH session'} <span>↗</span></button>
-        <div className="modal-foot"><span><span className="online-dot"/> Local SSH bridge</span><span>ssh.exe · OpenSSH</span></div>
+        <button className="submit-button" type="submit" disabled={status === 'connecting'}>{status === 'connecting' ? 'Starting…' : shell === 'pwsh' ? 'Start PowerShell' : 'Start SSH session'} <span>↗</span></button>
+        <div className="modal-foot"><span><span className="online-dot"/> Local terminal bridge</span><span>{shell === 'pwsh' ? 'pwsh.exe · PowerShell 7' : 'ssh.exe · OpenSSH'}</span></div>
       </form>
     </div>}
   </div>;

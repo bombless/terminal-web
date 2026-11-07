@@ -12,7 +12,7 @@ const dist = join(root, 'dist');
 const sessions = new Map<WebSocket, ReturnType<typeof spawn>>();
 
 type ClientMessage =
-  | { type: 'connect'; host: string; username?: string; port?: number; identityFile?: string; cols?: number; rows?: number }
+  | { type: 'connect'; shell?: 'ssh' | 'pwsh'; host?: string; username?: string; port?: number; identityFile?: string; cols?: number; rows?: number }
   | { type: 'data'; data: string }
   | { type: 'resize'; cols: number; rows: number }
   | { type: 'disconnect' };
@@ -33,19 +33,28 @@ function validOrigin(origin: string | undefined) {
     return ['127.0.0.1', 'localhost'].includes(url.hostname) && ['http:', 'https:'].includes(url.protocol);
   } catch { return false; }
 }
-function startSsh(socket: WebSocket, input: Extract<ClientMessage, { type: 'connect' }>) {
-  if (sessions.has(socket)) throw new Error('This connection already has an active SSH process.');
-  const host = input.host.trim();
-  if (!host || host.length > 253 || /[\s\u0000-\u001f]/.test(host) || host.startsWith('-')) {
-    throw new Error('Enter a valid SSH host name or IP address.');
+function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 'connect' }>) {
+  if (sessions.has(socket)) throw new Error('This connection already has an active terminal process.');
+  const shell = input.shell ?? 'ssh';
+  let executable: string;
+  let args: string[];
+  if (shell === 'pwsh') {
+    executable = 'pwsh.exe';
+    args = ['-NoLogo'];
+  } else {
+    const host = input.host?.trim() ?? '';
+    if (!host || host.length > 253 || /[\s\u0000-\u001f]/.test(host) || host.startsWith('-')) {
+      throw new Error('Enter a valid SSH host name or IP address.');
+    }
+    const port = input.port ?? 22;
+    if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SSH port must be between 1 and 65535.');
+    args = ['-tt', '-p', String(port)];
+    if (input.username?.trim()) args.push('-l', input.username.trim());
+    if (input.identityFile?.trim()) args.push('-i', input.identityFile.trim());
+    args.push('--', host);
+    executable = 'ssh.exe';
   }
-  const port = input.port ?? 22;
-  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error('SSH port must be between 1 and 65535.');
-  const args = ['-tt', '-p', String(port)];
-  if (input.username?.trim()) args.push('-l', input.username.trim());
-  if (input.identityFile?.trim()) args.push('-i', input.identityFile.trim());
-  args.push('--', host);
-  const terminal = spawn('ssh.exe', args, {
+  const terminal = spawn(executable, args, {
     name: 'xterm-256color', cols: Math.max(20, Math.min(400, input.cols ?? 100)),
     rows: Math.max(5, Math.min(200, input.rows ?? 30)), cwd: process.env.USERPROFILE,
     env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
@@ -87,7 +96,7 @@ wss.on('connection', socket => {
     try { message = JSON.parse(raw.toString()) as ClientMessage; }
     catch { send(socket, { type: 'error', message: 'Invalid message format.' }); return; }
     try {
-      if (message.type === 'connect') startSsh(socket, message);
+      if (message.type === 'connect') startTerminal(socket, message);
       else if (message.type === 'data') sessions.get(socket)?.write(message.data);
       else if (message.type === 'resize') {
         const terminal = sessions.get(socket);
