@@ -65,7 +65,7 @@ export default function App() {
     if (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535) { setError('Port must be between 1 and 65535.'); return; }
     closeSocket(); setError(''); setStatus('connecting'); setShowConnect(false);
     term.current?.clear();
-    const ws = new WebSocket('ws://127.0.0.1:8787/terminal'); socket.current = ws;
+    const ws = new WebSocket('ws://127.0.0.1:8700/terminal'); socket.current = ws;
     ws.onopen = () => ws.send(JSON.stringify({ type: 'connect', host: host.trim(), username: username.trim(), port: sshPort, identityFile: identityFile.trim(), cols: term.current?.cols ?? 100, rows: term.current?.rows ?? 30 }));
     ws.onmessage = event => {
       const message = JSON.parse(String(event.data)) as { type: string; data?: string; message?: string; exitCode?: number };

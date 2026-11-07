@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node-pty';
 import { WebSocket, WebSocketServer } from 'ws';
 
-const PORT = Number(process.env.PORT ?? 8787);
+const PORT = Number(process.env.PORT ?? 8700);
 const HOST = '127.0.0.1';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const dist = join(root, 'dist');

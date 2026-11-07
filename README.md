@@ -16,7 +16,7 @@ npm install
 npm run dev
 ```
 
-Open http://127.0.0.1:5173. The SSH bridge listens on http://127.0.0.1:8787.
+Open http://127.0.0.1:5173. The SSH bridge listens on http://127.0.0.1:8700.
 
 Production:
 
@@ -25,7 +25,7 @@ npm run build
 npm start
 ```
 
-Then open http://127.0.0.1:8787.
+Then open http://127.0.0.1:8700.
 
 ## SSH and terminal behavior
 
