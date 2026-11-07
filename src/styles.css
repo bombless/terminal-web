@@ -66,5 +66,8 @@
 @media(max-width:900px){.forward-port-row{gap:8px}.forward-arrow{display:none}}
 @media(max-width:760px){.forward-panel .start-panel-heading{margin-bottom:17px}.forward-port-row{gap:10px}.forward-label{margin-bottom:13px}}
 
+/* The inline start screen replaces the former connection modal. */
+.modal-backdrop{display:none!important}
+
 /* Active SSH forwarding shown at the bottom of the sidebar */
 .sidebar-forwards{margin:0 2px 10px;padding:10px;border:1px solid #344239;background:#202922;border-radius:8px}.sidebar-forward-heading{display:flex;align-items:center;gap:7px;color:#91b99a;font:9px 'DM Mono',monospace;letter-spacing:.8px;margin-bottom:9px}.sidebar-forward-row{display:flex;align-items:flex-start;gap:8px;color:#a8c8af}.sidebar-forward-row>svg{flex:0 0 auto;margin-top:2px}.sidebar-forward-row strong,.sidebar-forward-row small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:190px}.sidebar-forward-row strong{font:11px 'DM Mono',monospace;color:#d5e6d8}.sidebar-forward-row small{margin-top:4px;font:9px 'DM Mono',monospace;color:#8b9c8e}
