@@ -67,8 +67,26 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
     env: { ...process.env, TERM: 'xterm-256color', COLORTERM: 'truecolor' } as Record<string, string>
   });
   sessions.set(socket, terminal);
-  terminal.onData(data => send(socket, { type: 'data', data }));
+  // Strip ConPTY startup handshake sequences on Windows (such as \x1b[1t, \x1b[c, \x1b[?1004h, \x1b[?9001h).
+  // Without filtering, the premature \x1b[c triggers an xterm.js Primary Device Attributes response
+  // (\x1b[?1;2c) before SSH is ready to receive input, which later leaks into interactive CLI sessions
+  // (e.g. pi) as stray "[?1;2c" text.
+  let isStartupPhase = process.platform === 'win32';
+  const startupTimer = isStartupPhase ? setTimeout(() => { isStartupPhase = false; }, 2500) : null;
+
+  terminal.onData(data => {
+    let payload = data;
+    if (isStartupPhase) {
+      payload = payload
+        .replace(/\x1b\[1t/g, '')
+        .replace(/\x1b\[c/g, '')
+        .replace(/\x1b\[\?1004h/g, '')
+        .replace(/\x1b\[\?9001[hl]/g, '');
+    }
+    if (payload) send(socket, { type: 'data', data: payload });
+  });
   terminal.onExit(({ exitCode, signal }) => {
+    if (startupTimer) clearTimeout(startupTimer);
     sessions.delete(socket);
     send(socket, { type: 'exit', exitCode, signal });
   });
