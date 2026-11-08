@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { Activity, ArrowLeftRight, ChevronDown, Command, Menu, Monitor, Play, Plus, Server, ShieldCheck, Square, SquareTerminal, TerminalSquare, Trash2, X } from 'lucide-react';
+import { Activity, ArrowLeftRight, ChevronDown, Command, CopyPlus, Menu, Monitor, Play, Plus, Server, ShieldCheck, Square, SquareTerminal, TerminalSquare, Trash2, X } from 'lucide-react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -86,6 +86,7 @@ export default function App() {
           void navigator.clipboard.readText().then(text => { if (text) terminal.paste(text); }).catch(() => {});
           return false;
         }
+        if (key === 'a') return false;
         return true;
       });
       terminalInstances.current.set(item.id, terminal); terminalFits.current.set(item.id, fit);
@@ -179,6 +180,15 @@ export default function App() {
     setSessions(current => [item, ...current]); setActiveId(item.id); socket.current = null; setHost(''); setUsername(''); setPort('22'); setIdentityFile(''); setShell('ssh');
     setError(''); setStatus('idle'); setShowConnect(true);
   };
+  const duplicateSession = (source: SavedSession) => {
+    const item: SavedSession = { ...source, id: crypto.randomUUID(), title: source.host.trim() || source.title || 'New connection', updatedAt: Date.now() };
+    setSessions(current => [item, ...current]);
+    setActiveId(item.id); setHost(item.host); setUsername(item.username); setPort(String(item.port)); setIdentityFile(item.identityFile); setShell(item.shell ?? 'ssh');
+    setError(''); setStatus('idle');
+    if (item.shell === 'pwsh' || item.host.trim()) connect(undefined, item);
+    else setShowConnect(true);
+  };
+
   const selectSession = (item: SavedSession) => {
     const existingSocket = sessionSockets.current.get(item.id);
     const isConnected = existingSocket?.readyState === WebSocket.OPEN;
@@ -186,6 +196,20 @@ export default function App() {
     setActiveId(item.id); setHost(item.host); setUsername(item.username); setPort(String(item.port)); setIdentityFile(item.identityFile); setShell(item.shell ?? 'ssh');
     setError(''); setStatus(isConnected ? 'connected' : 'idle'); setShowConnect(!isConnected);
   };
+
+  useEffect(() => {
+    const handleShortcut = (event: KeyboardEvent) => {
+      if (!event.ctrlKey || event.altKey || event.shiftKey || event.key.toLowerCase() !== 'a') return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, form textarea, select, [contenteditable="true"]')) return;
+      event.preventDefault(); event.stopPropagation();
+      const current = sessions.find(item => item.id === activeId);
+      if (current) duplicateSession(current);
+      else newSession();
+    };
+    window.addEventListener('keydown', handleShortcut);
+    return () => window.removeEventListener('keydown', handleShortcut);
+  }, [sessions, activeId]);
 
   const deleteSession = (id: string) => {
     const remaining = sessions.filter(item => item.id !== id);
@@ -234,7 +258,7 @@ export default function App() {
       <div className="brand"><div className="brand-mark"><SquareTerminal size={19}/></div><span>terminal</span><button className="icon-button sidebar-toggle" onClick={() => setSidebarOpen(false)} aria-label="Close sidebar"><Menu size={17}/></button></div>
       <button className="new-chat" onClick={newSession}><Plus size={17}/><span>New connection</span></button>
       <div className="side-label">YOUR SESSIONS</div>
-      <div className="session-list">{sessions.map(item => <div key={item.id} className={`session-row ${item.id === activeId ? 'selected' : ''}`}><button type="button" className={`session-item ${item.id === activeId ? 'selected' : ''}`} onClick={() => selectSession(item)}><TerminalSquare size={15}/><span>{item.title || 'New connection'}</span></button><button type="button" className="session-delete" onClick={() => deleteSession(item.id)} aria-label={`Delete ${item.title || 'New connection'}`} title="Delete session"><Trash2 size={14}/></button></div>)}</div>
+      <div className="session-list">{sessions.map(item => <div key={item.id} className={`session-row ${item.id === activeId ? 'selected' : ''}`}><button type="button" className={`session-item ${item.id === activeId ? 'selected' : ''}`} onClick={() => selectSession(item)}><TerminalSquare size={15}/><span>{item.title || 'New connection'}</span></button><button type="button" className="session-duplicate" onClick={() => duplicateSession(item)} aria-label={`Open another ${item.title || 'session'}`} title="Open another session with the same connection"><CopyPlus size={14}/></button><button type="button" className="session-delete" onClick={() => deleteSession(item.id)} aria-label={`Delete ${item.title || 'New connection'}`} title="Delete session"><Trash2 size={14}/></button></div>)}</div>
       <div className="sidebar-bottom">
         {activeForward && <button type="button" className={`sidebar-forwards ${showForwarding ? 'selected' : ''}`} onClick={() => setShowForwarding(true)} aria-label="Open SSH Port Forwarding settings"><span className="sidebar-forward-heading"><span className="state-dot live"/> ACTIVE PORT FORWARD</span><span className="sidebar-forward-row"><ArrowLeftRight size={14}/><span><strong>localhost:{activeForward.localPort}</strong><small>→ {activeForward.host}:{activeForward.remotePort}</small></span></span></button>}
 
