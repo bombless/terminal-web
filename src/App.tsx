@@ -83,7 +83,13 @@ export default function App() {
           return true;
         }
         if (key === 'v') {
-          void navigator.clipboard.readText().then(text => { if (text) terminal.paste(text); }).catch(() => {});
+          // Suppress the browser default so xterm cannot also paste natively;
+          // read the clipboard and inject the text exactly once instead.
+          event.preventDefault();
+          event.stopPropagation();
+          void navigator.clipboard.readText().then(text => {
+            if (text) terminal.paste(text);
+          }).catch(() => {});
           return false;
         }
         if (key === 'a') return false;
