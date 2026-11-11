@@ -11,6 +11,7 @@ const HOST = '127.0.0.1';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const dist = join(root, 'dist');
 const sessions = new Map<WebSocket, ReturnType<typeof spawn>>();
+const startupPhases = new Map<WebSocket, () => void>();
 
 type ClientMessage =
   | { type: 'connect'; shell?: 'ssh' | 'pwsh'; host?: string; username?: string; port?: number; identityFile?: string; cols?: number; rows?: number }
@@ -72,7 +73,13 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
   // (\x1b[?1;2c) before SSH is ready to receive input, which later leaks into interactive CLI sessions
   // (e.g. pi) as stray "[?1;2c" text.
   let isStartupPhase = true;
-  const startupTimer = setTimeout(() => { isStartupPhase = false; }, 2500);
+  const endStartup = () => {
+    isStartupPhase = false;
+    clearTimeout(startupTimer);
+    startupPhases.delete(socket);
+  };
+  const startupTimer = setTimeout(endStartup, 2500);
+  startupPhases.set(socket, endStartup);
 
   terminal.onData(data => {
     let payload = data;
@@ -86,7 +93,7 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
     if (payload) send(socket, { type: 'data', data: payload });
   });
   terminal.onExit(({ exitCode, signal }) => {
-    clearTimeout(startupTimer);
+    endStartup();
     sessions.delete(socket);
     send(socket, { type: 'exit', exitCode, signal });
   });
@@ -165,7 +172,10 @@ wss.on('connection', (socket, request) => {
     catch { send(socket, { type: 'error', message: 'Invalid message format.' }); return; }
     try {
       if (message.type === 'connect') startTerminal(socket, message);
-      else if (message.type === 'data') sessions.get(socket)?.write(message.data);
+      else if (message.type === 'data') {
+        startupPhases.get(socket)?.();
+        sessions.get(socket)?.write(message.data);
+      }
       else if (message.type === 'resize') {
         const terminal = sessions.get(socket);
         if (terminal) terminal.resize(Math.max(20, Math.min(400, Math.floor(message.cols))), Math.max(5, Math.min(200, Math.floor(message.rows))));
@@ -174,6 +184,10 @@ wss.on('connection', (socket, request) => {
       send(socket, { type: 'error', message: error instanceof Error ? error.message : 'Unable to start SSH.' });
     }
   });
-  socket.on('close', () => { sessions.get(socket)?.kill(); sessions.delete(socket); });
+  socket.on('close', () => {
+    startupPhases.get(socket)?.();
+    sessions.get(socket)?.kill();
+    sessions.delete(socket);
+  });
 });
 server.listen(PORT, HOST, () => console.log('Terminal SSH bridge listening at http://' + HOST + ':' + PORT));

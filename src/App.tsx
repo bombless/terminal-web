@@ -4,6 +4,8 @@ import { Activity, ArrowLeftRight, ChevronDown, Command, CopyPlus, Menu, Monitor
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
+import { ImageAddon } from '@xterm/addon-image';
+import { KittyProtocolHandler } from './kittyGraphics';
 
 type SavedSession = { id: string; title: string; host: string; username: string; port: number; identityFile: string; shell?: 'ssh' | 'pwsh'; updatedAt: number };
 const STORAGE_KEY = 'terminal-web.sessions';
@@ -40,6 +42,8 @@ export default function App() {
   activeIdRef.current = activeId;
   const terminalInstances = useRef(new Map<string, Terminal>());
   const terminalFits = useRef(new Map<string, FitAddon>());
+  const terminalImages = useRef(new Map<string, ImageAddon>());
+  const kittyHandlers = useRef(new Map<string, KittyProtocolHandler>());
   const terminalMounts = useRef(new Map<string, HTMLDivElement>());
   const terminalObservers = useRef(new Map<string, ResizeObserver>());
   const socket = useRef<WebSocket | null>(null);
@@ -70,7 +74,17 @@ export default function App() {
         theme: { background: '#171717', foreground: '#e5e5e5', cursor: '#f5f5f5', cursorAccent: '#171717', selectionBackground: '#454545', black: '#171717', red: '#f87171', green: '#4ade80', yellow: '#facc15', blue: '#60a5fa', magenta: '#c084fc', cyan: '#67e8f9', white: '#e5e5e5', brightBlack: '#737373', brightRed: '#fca5a5', brightGreen: '#86efac', brightYellow: '#fde68a', brightBlue: '#93c5fd', brightMagenta: '#d8b4fe', brightCyan: '#a5f3fc', brightWhite: '#fafafa' }
       });
       const fit = new FitAddon();
-      terminal.loadAddon(fit); terminal.loadAddon(new WebLinksAddon()); terminal.open(mount);
+      const imageAddon = new ImageAddon({
+        enableSizeReports: true,
+        sixelSupport: true,
+        sixelScrolling: true,
+        iipSupport: true,
+        storageLimit: 128
+      });
+      terminal.loadAddon(fit);
+      terminal.loadAddon(new WebLinksAddon());
+      terminal.loadAddon(imageAddon);
+      terminal.open(mount);
       terminal.attachCustomKeyEventHandler(event => {
         if (event.type !== 'keydown' || !(event.ctrlKey || event.metaKey)) return true;
         const key = event.key.toLowerCase();
@@ -95,7 +109,28 @@ export default function App() {
         if (key === 'a') return false;
         return true;
       });
-      terminalInstances.current.set(item.id, terminal); terminalFits.current.set(item.id, fit);
+      const kittyHandler = new KittyProtocolHandler(
+        data => terminal.write(data),
+        data => {
+          const activeSocket = sessionSockets.current.get(item.id);
+          if (activeSocket?.readyState === WebSocket.OPEN) {
+            activeSocket.send(JSON.stringify({ type: 'data', data }));
+          }
+        },
+        () => {
+          const dims = (terminal as any)._core?._renderService?.dimensions?.css?.cell;
+          if (dims?.width > 0 && dims?.height > 0) {
+            return { width: dims.width, height: dims.height };
+          }
+          const fs = terminal.options.fontSize || 13;
+          const lh = terminal.options.lineHeight || 1.35;
+          return { width: fs * 0.6, height: fs * lh };
+        }
+      );
+      terminalInstances.current.set(item.id, terminal);
+      terminalFits.current.set(item.id, fit);
+      terminalImages.current.set(item.id, imageAddon);
+      kittyHandlers.current.set(item.id, kittyHandler);
       terminal.onData(data => {
         if (activeIdRef.current !== item.id) return;
         const activeSocket = sessionSockets.current.get(item.id);
@@ -112,6 +147,8 @@ export default function App() {
     for (const [id, terminal] of terminalInstances.current) {
       if (liveIds.has(id)) continue;
       terminalObservers.current.get(id)?.disconnect(); terminalObservers.current.delete(id);
+      terminalImages.current.get(id)?.dispose(); terminalImages.current.delete(id);
+      kittyHandlers.current.delete(id);
       terminal.dispose(); terminalInstances.current.delete(id); terminalFits.current.delete(id);
     }
     term.current = terminalInstances.current.get(activeId) ?? null;
@@ -135,6 +172,9 @@ export default function App() {
     sessionSockets.current.clear();
     terminalObservers.current.forEach(observer => observer.disconnect());
     terminalObservers.current.clear();
+    terminalImages.current.forEach(addon => addon.dispose());
+    terminalImages.current.clear();
+    kittyHandlers.current.clear();
     terminalInstances.current.forEach(terminal => terminal.dispose());
     terminalInstances.current.clear();
     closeSocket();
@@ -164,7 +204,12 @@ export default function App() {
     ws.onmessage = event => {
       const message = JSON.parse(String(event.data)) as { type: string; data?: string; message?: string; exitCode?: number };
       if (message.type === 'data' && message.data) {
-        terminalInstances.current.get(sessionId)?.write(message.data);
+        const handler = kittyHandlers.current.get(sessionId);
+        if (handler) {
+          handler.process(message.data);
+        } else {
+          terminalInstances.current.get(sessionId)?.write(message.data);
+        }
       }
       if (message.type === 'status') {
         if (activeIdRef.current === sessionId) setStatus('connected');
