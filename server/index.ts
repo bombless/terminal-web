@@ -44,7 +44,7 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
   let args: string[];
   if (shell === 'pwsh') {
     executable = 'pwsh.exe';
-    args = ['-NoLogo', '-NoExit', '-Command', "$global:__terminalWebOriginalPrompt = $function:prompt; function global:prompt { $p = if ($global:__terminalWebOriginalPrompt) { & $global:__terminalWebOriginalPrompt } else { 'PS $($executionContext.SessionState.Path.CurrentLocation)> ' }; [Console]::Write(([char]27)+']9;9;'+(Get-Location).Path+([char]27)+([char]92)); $p }"];
+    args = ['-NoLogo', '-NoExit', '-Command', "$global:__terminalWebOriginalPrompt = $function:prompt; function global:prompt { $p = if ($global:__terminalWebOriginalPrompt) { & $global:__terminalWebOriginalPrompt } else { "PS $($executionContext.SessionState.Path.CurrentLocation)> " }; [Console]::Write(([char]27)+']9;9;'+(Get-Location).Path+([char]27)+([char]92)); $p }"];
   } else {
     const host = input.host?.trim() ?? '';
     if (!host || host.length > 253 || /[\s\u0000-\u001f]/.test(host) || host.startsWith('-')) {
