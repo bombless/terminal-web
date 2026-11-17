@@ -48,7 +48,8 @@ export default function App() {
   const terminalObservers = useRef(new Map<string, ResizeObserver>());
   const socket = useRef<WebSocket | null>(null);
   const sessionSockets = useRef(new Map<string, WebSocket>());
-  const inputLines = useRef(new Map<string, string>());\n  const shellBySession = useRef(new Map<string, 'ssh' | 'pwsh'>());
+  const inputLines = useRef(new Map<string, string>());
+  const shellBySession = useRef(new Map<string, 'ssh' | 'pwsh'>());
   const branchPickerRef = useRef<{ items: string[]; selected: number; filter: string } | null>(null);
   const [branchPicker, setBranchPickerState] = useState<{ items: string[]; selected: number; filter: string } | null>(null);
   const setBranchPicker = (value: { items: string[]; selected: number; filter: string } | null) => {
@@ -241,7 +242,8 @@ export default function App() {
     const targetIdentity = saved?.identityFile ?? identityFile;
     if (targetShell === 'ssh' && !targetHost.trim()) { setError('Please enter a host name or IP address.'); return; }
     if (targetShell === 'ssh' && (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535)) { setError('Port must be between 1 and 65535.'); return; }
-    const sessionId = saved?.id ?? activeId;\n    shellBySession.current.set(sessionId, targetShell);
+    const sessionId = saved?.id ?? activeId;
+    shellBySession.current.set(sessionId, targetShell);
     sessionSockets.current.get(sessionId)?.close();
     sessionSockets.current.delete(sessionId);
     socket.current = null;
@@ -263,7 +265,11 @@ export default function App() {
           terminalInstances.current.get(sessionId)?.write(message.data);
         }
       }
-      if (message.type === 'branches' && activeIdRef.current === sessionId) {\n        const current = branchPickerRef.current;\n        if (current) setBranchPicker({ ...current, items: (message.branches || []).slice(0, 20), selected: 0 });\n      }\n      if (message.type === 'status') {
+      if (message.type === 'branches' && activeIdRef.current === sessionId) {
+        const current = branchPickerRef.current;
+        if (current) setBranchPicker({ ...current, items: (message.branches || []).slice(0, 20), selected: 0 });
+      }
+      if (message.type === 'status') {
         if (activeIdRef.current === sessionId) setStatus('connected');
         setSessions(current => current.map(item => item.id === sessionId ? { ...item, title: targetShell === 'pwsh' ? 'Local PowerShell' : targetHost.trim(), host: targetHost.trim(), username: targetUsername.trim(), port: sshPort, identityFile: targetIdentity.trim(), shell: targetShell, updatedAt: Date.now() } : item));
         if (activeIdRef.current === sessionId) requestAnimationFrame(() => terminalInstances.current.get(sessionId)?.focus());
