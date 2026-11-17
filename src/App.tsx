@@ -48,6 +48,14 @@ export default function App() {
   const terminalObservers = useRef(new Map<string, ResizeObserver>());
   const socket = useRef<WebSocket | null>(null);
   const sessionSockets = useRef(new Map<string, WebSocket>());
+  const inputLines = useRef(new Map<string, string>());
+  const shellBySession = useRef(new Map<string, 'ssh' | 'pwsh'>());
+  const branchPickerRef = useRef<{ items: string[]; selected: number; filter: string } | null>(null);
+  const [branchPicker, setBranchPickerState] = useState<{ items: string[]; selected: number; filter: string } | null>(null);
+  const setBranchPicker = (value: { items: string[]; selected: number; filter: string } | null) => {
+    branchPickerRef.current = value;
+    setBranchPickerState(value);
+  };
 
   const active = sessions.find(item => item.id === activeId) ?? sessions[0];
   const recentSshSessions = sessions.filter(item => item.shell !== 'pwsh' && item.host.trim()).sort((a, b) => b.updatedAt - a.updatedAt);
@@ -134,7 +142,52 @@ export default function App() {
       terminal.onData(data => {
         if (activeIdRef.current !== item.id) return;
         const activeSocket = sessionSockets.current.get(item.id);
-        if (activeSocket?.readyState === WebSocket.OPEN) activeSocket.send(JSON.stringify({ type: 'data', data }));
+        if (activeSocket?.readyState !== WebSocket.OPEN) return;
+        const sendData = (value: string) => activeSocket.send(JSON.stringify({ type: 'data', data: value }));
+        if (shellBySession.current.get(item.id) !== 'pwsh') { sendData(data); return; }
+        const picker = branchPickerRef.current;
+        if (picker) {
+          if (data === '\x1b[A' || data === '\x1b[B') {
+            const choices = picker.items.filter(name => name.toLowerCase().includes(picker.filter.toLowerCase()));
+            setBranchPicker({ ...picker, selected: Math.max(0, Math.min(Math.max(0, choices.length - 1), picker.selected + (data === '\x1b[A' ? -1 : 1))) }); return;
+          }
+          if (data === '\x1b') { setBranchPicker(null); return; }
+          if (data === '\r') {
+            const choices = picker.items.filter(name => name.toLowerCase().includes(picker.filter.toLowerCase()));
+            if (choices[picker.selected]) { sendData(choices[picker.selected]); inputLines.current.set(item.id, 'git checkout ' + choices[picker.selected]); }
+            else sendData(data);
+            setBranchPicker(null); return;
+          }
+          if (data === '\x03') { inputLines.current.set(item.id, ''); setBranchPicker(null); sendData(data); return; }
+          if (data === '\x7f' || data === '\b') {
+            const line = (inputLines.current.get(item.id) || '').slice(0, -1);
+            inputLines.current.set(item.id, line);
+            setBranchPicker({ ...picker, filter: line.slice('git checkout '.length), selected: 0 });
+            sendData(data); return;
+          }
+          if (/^[\x20-\x7e]+$/.test(data)) {
+            const line = (inputLines.current.get(item.id) || '') + data;
+            inputLines.current.set(item.id, line);
+            setBranchPicker({ ...picker, filter: line.slice('git checkout '.length), selected: 0 });
+          }
+          sendData(data); return;
+        }
+        if (data === '\r' || data === '\x03') { inputLines.current.set(item.id, ''); sendData(data); return; }
+        if (data === '\x7f' || data === '\b') {
+          inputLines.current.set(item.id, (inputLines.current.get(item.id) || '').slice(0, -1));
+          sendData(data); return;
+        }
+        if (/^[\x20-\x7e]+$/.test(data)) {
+          const line = (inputLines.current.get(item.id) || '') + data;
+          inputLines.current.set(item.id, line);
+          sendData(data);
+          if (/^\s*git\s+checkout\s+$/i.test(line)) {
+            setBranchPicker({ items: [], selected: 0, filter: '' });
+            activeSocket.send(JSON.stringify({ type: 'branches' }));
+          }
+          return;
+        }
+        sendData(data);
       });
       const observer = new ResizeObserver(() => {
         if (activeIdRef.current !== item.id || mount.offsetParent === null) return;
@@ -190,6 +243,7 @@ export default function App() {
     if (targetShell === 'ssh' && !targetHost.trim()) { setError('Please enter a host name or IP address.'); return; }
     if (targetShell === 'ssh' && (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535)) { setError('Port must be between 1 and 65535.'); return; }
     const sessionId = saved?.id ?? activeId;
+    shellBySession.current.set(sessionId, targetShell);
     sessionSockets.current.get(sessionId)?.close();
     sessionSockets.current.delete(sessionId);
     socket.current = null;
@@ -202,7 +256,7 @@ export default function App() {
       ws.send(JSON.stringify({ type: 'connect', shell: targetShell, host: targetHost.trim(), username: targetUsername.trim(), port: sshPort, identityFile: targetIdentity.trim(), cols: terminal?.cols ?? 100, rows: terminal?.rows ?? 30 }));
     };
     ws.onmessage = event => {
-      const message = JSON.parse(String(event.data)) as { type: string; data?: string; message?: string; exitCode?: number };
+      const message = JSON.parse(String(event.data)) as { type: string; data?: string; message?: string; exitCode?: number; branches?: string[] };
       if (message.type === 'data' && message.data) {
         const handler = kittyHandlers.current.get(sessionId);
         if (handler) {
@@ -210,6 +264,10 @@ export default function App() {
         } else {
           terminalInstances.current.get(sessionId)?.write(message.data);
         }
+      }
+      if (message.type === 'branches' && activeIdRef.current === sessionId) {
+        const current = branchPickerRef.current;
+        if (current) setBranchPicker({ ...current, items: (message.branches || []).slice(0, 20), selected: 0 });
       }
       if (message.type === 'status') {
         if (activeIdRef.current === sessionId) setStatus('connected');
@@ -359,7 +417,21 @@ export default function App() {
         </div>}
         <div className="terminal-card" style={{ display: status === 'connected' && !showForwarding ? undefined : 'none' }}>
           <div className="terminal-toolbar"><div className="window-controls"><i/><i/><i/></div><div className="terminal-caption"><Activity size={13}/><span>{active?.shell === 'pwsh' ? 'LOCAL POWERSHELL' : active?.host || 'LOCAL TERMINAL'}</span><span className="caption-separator">·</span><span>{status === 'connected' ? (active?.shell === 'pwsh' ? 'PWSH' : 'SSH') : 'AWAITING CONNECTION'}</span></div><button className="toolbar-button" onClick={() => term.current?.clear()} title="Clear terminal"><Command size={14}/></button></div>
-          <div className="terminal-screen">{sessions.map(item => <div key={item.id} className="terminal-mount" ref={node => { if (node) terminalMounts.current.set(item.id, node); else terminalMounts.current.delete(item.id); }} style={{ display: item.id === activeId ? 'block' : 'none' }}/>)}</div>
+          <div className="terminal-screen">{sessions.map(item => <div key={item.id} className="terminal-mount" ref={node => { if (node) terminalMounts.current.set(item.id, node); else terminalMounts.current.delete(item.id); }} style={{ display: item.id === activeId ? 'block' : 'none' }}/>)}
+            {active?.shell === 'pwsh' && branchPicker && <div className="branch-picker" role="listbox" aria-label="Git branches">
+              <div className="branch-picker-heading"><span>SWITCH BRANCH</span><span>{branchPicker.items.length}/20</span></div>
+              {branchPicker.items.filter(name => name.toLowerCase().includes(branchPicker.filter.toLowerCase())).slice(0,20).map((name,index) => <button type="button" role="option" aria-selected={index === branchPicker.selected} className={index === branchPicker.selected ? 'branch-option selected' : 'branch-option'} key={name} onMouseDown={event => event.preventDefault()} onClick={() => {
+                const ws = sessionSockets.current.get(activeId);
+                if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'data', data: name }));
+                inputLines.current.set(activeId, 'git checkout ' + name);
+                setBranchPicker(null);
+                terminalInstances.current.get(activeId)?.focus();
+              }}><span className="branch-option-icon">{name.startsWith('origin/') ? '↗' : '⑂'}</span><span>{name}</span>{index === branchPicker.selected && <kbd>↵</kbd>}</button>)}
+              {branchPicker.items.length === 0 && <div className="branch-picker-empty">No Git branches found in this folder</div>}
+              {branchPicker.items.length > 0 && branchPicker.items.filter(name => name.toLowerCase().includes(branchPicker.filter.toLowerCase())).length === 0 && <div className="branch-picker-empty">No matching branches</div>}
+              <div className="branch-picker-footer"><span>↑↓ Navigate</span><span>↵ Select</span><span>Esc Close</span></div>
+            </div>}
+          </div>
           <div className="terminal-footer"><span><span className={`state-dot ${status === 'connected' ? 'live' : ''}`}/>{status === 'connected' ? 'SESSION ACTIVE' : 'AWAITING CONNECTION'}</span><span>xterm.js <b>·</b> UTF-8 <b>·</b> {status === 'connected' ? 'INTERACTIVE PTY' : 'LOCAL'}</span></div>
         </div>
         {status === 'connected' && !showForwarding && <div className="hint-row"><span><kbd>Ctrl</kbd> + <kbd>C</kbd> <span>Interrupt process</span></span><span><Monitor size={13}/> Resize-aware PTY</span></div>}
