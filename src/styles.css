@@ -77,3 +77,14 @@
 .session-row:hover .session-duplicate,.session-row:focus-within .session-duplicate{opacity:1;pointer-events:auto}
 .session-duplicate:hover{background:#293b32;color:#b7ddc4}
 .session-duplicate:focus-visible{opacity:1;pointer-events:auto;outline:1px solid #888;outline-offset:1px}
+
+.terminal-screen{position:relative}
+.branch-picker{position:absolute;z-index:8;left:18px;top:42px;width:min(360px,calc(100% - 36px));max-height:340px;overflow:auto;padding:7px;border:1px solid #454545;border-radius:9px;background:#202020;box-shadow:0 16px 42px #0009;color:#ddd;font-family:'DM Sans',sans-serif}
+.branch-picker-heading{display:flex;justify-content:space-between;padding:7px 9px 9px;color:#8d9d91;font:9px 'DM Mono',monospace;letter-spacing:1px}
+.branch-option{width:100%;display:flex;align-items:center;gap:10px;padding:9px 10px;border:0;border-radius:6px;background:transparent;color:#ddd;text-align:left;font:11px 'DM Mono',monospace;cursor:pointer}
+.branch-option:hover,.branch-option.selected{background:#303b33;color:#e7f1e9}
+.branch-option-icon{width:16px;color:#9dbba4;text-align:center}
+.branch-option>span:nth-child(2){min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.branch-option kbd{padding:2px 5px;border:1px solid #59685c;border-radius:4px;color:#b8d1bd;font:9px 'DM Mono',monospace}
+.branch-picker-empty{padding:18px 10px;color:#888;font-size:11px;text-align:center}
+.branch-picker-footer{display:flex;justify-content:space-between;gap:8px;padding:9px 7px 4px;margin-top:5px;border-top:1px solid #383838;color:#777;font:9px 'DM Mono',monospace}
