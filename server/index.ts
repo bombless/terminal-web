@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { spawn as spawnProcess } from 'node:child_process';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { extname, join, normalize } from 'node:path';
+import { extname, join, normalize, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node-pty';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -11,13 +11,13 @@ const HOST = '127.0.0.1';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const dist = join(root, 'dist');
 const sessions = new Map<WebSocket, ReturnType<typeof spawn>>();
-const startupPhases = new Map<WebSocket, () => void>();
+const startupPhases = new Map<WebSocket, () => void>();\nconst powerShellCwds = new Map<WebSocket, string>();
 
 type ClientMessage =
   | { type: 'connect'; shell?: 'ssh' | 'pwsh'; host?: string; username?: string; port?: number; identityFile?: string; cols?: number; rows?: number }
   | { type: 'data'; data: string }
   | { type: 'resize'; cols: number; rows: number }
-  | { type: 'disconnect' };
+  | { type: 'branches' }\n  | { type: 'disconnect' };
 type ForwardMessage = { type: 'start'; host: string; username?: string; sshPort: number; identityFile?: string; remotePort: number; localPort: number } | { type: 'stop' };
 const forwardingSessions = new Map<WebSocket, ReturnType<typeof spawnProcess>>();
 
@@ -44,7 +44,7 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
   let args: string[];
   if (shell === 'pwsh') {
     executable = 'pwsh.exe';
-    args = ['-NoLogo'];
+    args = ['-NoLogo', '-NoExit', '-Command', "$global:__terminalWebOriginalPrompt = $function:prompt; function global:prompt { $p = if ($global:__terminalWebOriginalPrompt) { & $global:__terminalWebOriginalPrompt } else { 'PS $($executionContext.SessionState.Path.CurrentLocation)> ' }; [Console]::Write(([char]27)+']9;9;'+(Get-Location).Path+([char]27)+'\\'); $p }"];
   } else {
     const host = input.host?.trim() ?? '';
     if (!host || host.length > 253 || /[\s\u0000-\u001f]/.test(host) || host.startsWith('-')) {
@@ -81,8 +81,25 @@ function startTerminal(socket: WebSocket, input: Extract<ClientMessage, { type: 
   const startupTimer = setTimeout(endStartup, 2500);
   startupPhases.set(socket, endStartup);
 
+  let pendingOutput = '';
   terminal.onData(data => {
-    let payload = data;
+    let output = pendingOutput + data;
+    pendingOutput = '';
+    const esc = String.fromCharCode(27);
+    const marker = esc + ']9;9;';
+    const st = esc + '\\';
+    while (true) {
+      const markerStart = output.indexOf(marker);
+      if (markerStart < 0) break;
+      const belEnd = output.indexOf(String.fromCharCode(7), markerStart);
+      const stEnd = output.indexOf(st, markerStart);
+      const markerEnd = belEnd >= 0 && (stEnd < 0 || belEnd < stEnd) ? belEnd + 1 : stEnd >= 0 ? stEnd + 2 : -1;
+      if (markerEnd < 0) { pendingOutput = output.slice(markerStart); output = output.slice(0, markerStart); break; }
+      const path = output.slice(markerStart + marker.length, markerEnd - (output[markerEnd - 1] === String.fromCharCode(7) ? 1 : 2));
+      if (shell === 'pwsh' && path) powerShellCwds.set(socket, resolve(path));
+      output = output.slice(0, markerStart) + output.slice(markerEnd);
+    }
+    let payload = output;
     if (isStartupPhase) {
       payload = payload
         .replace(/\x1b\[1t/g, '')
@@ -175,6 +192,19 @@ wss.on('connection', (socket, request) => {
       else if (message.type === 'data') {
         startupPhases.get(socket)?.();
         sessions.get(socket)?.write(message.data);
+      }
+      else if (message.type === 'branches') {
+        const cwd = powerShellCwds.get(socket);
+        if (!cwd || !existsSync(cwd) || !statSync(cwd).isDirectory()) { send(socket, { type: 'branches', branches: [] }); return; }
+        const git = spawnProcess('git.exe', ['branch', '--all', '--format=%(refname:short)'], { cwd, windowsHide: true, stdio: ['ignore', 'pipe', 'ignore'] });
+        let output = '';
+        git.stdout?.on('data', chunk => { output = (output + String(chunk)).slice(-20000); });
+        git.once('error', () => send(socket, { type: 'branches', branches: [] }));
+        git.once('close', code => {
+          if (code !== 0 || socket.readyState !== WebSocket.OPEN) { send(socket, { type: 'branches', branches: [] }); return; }
+          const branches = [...new Set(output.split(/\r?\n/).map(name => name.trim()).filter(name => name && !name.includes(' -> ')))].slice(0, 20);
+          send(socket, { type: 'branches', branches });
+        });
       }
       else if (message.type === 'resize') {
         const terminal = sessions.get(socket);
