@@ -48,7 +48,7 @@ export default function App() {
   const terminalObservers = useRef(new Map<string, ResizeObserver>());
   const socket = useRef<WebSocket | null>(null);
   const sessionSockets = useRef(new Map<string, WebSocket>());
-  const inputLines = useRef(new Map<string, string>());
+  const inputLines = useRef(new Map<string, string>());\n  const shellBySession = useRef(new Map<string, 'ssh' | 'pwsh'>());
   const branchPickerRef = useRef<{ items: string[]; selected: number; filter: string } | null>(null);
   const [branchPicker, setBranchPickerState] = useState<{ items: string[]; selected: number; filter: string } | null>(null);
   const setBranchPicker = (value: { items: string[]; selected: number; filter: string } | null) => {
@@ -143,7 +143,7 @@ export default function App() {
         const activeSocket = sessionSockets.current.get(item.id);
         if (activeSocket?.readyState !== WebSocket.OPEN) return;
         const sendData = (value: string) => activeSocket.send(JSON.stringify({ type: 'data', data: value }));
-        if (item.shell !== 'pwsh') { sendData(data); return; }
+        if (shellBySession.current.get(item.id) !== 'pwsh') { sendData(data); return; }
         const picker = branchPickerRef.current;
         if (picker) {
           if (data === '\x1b[A' || data === '\x1b[B') {
@@ -241,7 +241,7 @@ export default function App() {
     const targetIdentity = saved?.identityFile ?? identityFile;
     if (targetShell === 'ssh' && !targetHost.trim()) { setError('Please enter a host name or IP address.'); return; }
     if (targetShell === 'ssh' && (!Number.isInteger(sshPort) || sshPort < 1 || sshPort > 65535)) { setError('Port must be between 1 and 65535.'); return; }
-    const sessionId = saved?.id ?? activeId;
+    const sessionId = saved?.id ?? activeId;\n    shellBySession.current.set(sessionId, targetShell);
     sessionSockets.current.get(sessionId)?.close();
     sessionSockets.current.delete(sessionId);
     socket.current = null;
@@ -421,7 +421,7 @@ export default function App() {
                 setBranchPicker(null);
                 terminalInstances.current.get(activeId)?.focus();
               }}><span className="branch-option-icon">{name.startsWith('origin/') ? '↗' : '⑂'}</span><span>{name}</span>{index === branchPicker.selected && <kbd>↵</kbd>}</button>)}
-              {branchPicker.items.length === 0 && <div className="branch-picker-empty">Loading branches…</div>}
+              {branchPicker.items.length === 0 && <div className="branch-picker-empty">No Git branches found in this folder</div>}
               {branchPicker.items.length > 0 && branchPicker.items.filter(name => name.toLowerCase().includes(branchPicker.filter.toLowerCase())).length === 0 && <div className="branch-picker-empty">No matching branches</div>}
               <div className="branch-picker-footer"><span>↑↓ Navigate</span><span>↵ Select</span><span>Esc Close</span></div>
             </div>}
